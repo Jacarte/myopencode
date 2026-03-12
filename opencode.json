@@ -1,0 +1,119 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "atlassian": {
+      "enabled": true,
+      "type": "remote",
+      "oauth": {},
+      "url": "https://mcp.atlassian.com/v1/sse"
+    },
+    "slack": {
+      "type": "local",
+      "command": [
+        "/Users/javcab/myslacky/env/bin/python",
+        "-u",
+        "/Users/javcab/myslacky/server.py"
+      ],
+      "enabled": true,
+      "environment": {
+        "SLACK_BOT_TOKEN": "{env:SLACK_BOT_TOKEN}"
+      }
+    },
+    "anytype": {
+      "command": [
+        "npx",
+        "-y",
+        "@anyproto/anytype-mcp"
+      ],
+      "type": "local",
+      "environment": {
+        "OPENAPI_MCP_HEADERS": "{env:OPENAPI_MCP_HEADERS}"
+      }
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "{env:CONTEXT7_API_KEY}"
+      },
+      "enabled": true
+    },
+    "browsermcp": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "@browsermcp/mcp@0.1.3"
+      ]
+    },
+    "playwright": {
+      "enabled": true,
+      "type": "local",
+      "command": [
+        "npx",
+        "@playwright/mcp@0.0.68"
+      ]
+    },
+    "prometheus": {
+      "type": "local",
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PROMETHEUS_URL",
+        "ghcr.io/pab1it0/prometheus-mcp-server"
+      ],
+      "environment": {
+        "PROMETHEUS_URL": "http://host.docker.internal:54671"
+      }
+    },
+    "gitlab_mr_service": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITLAB_TOKEN",
+        "-e",
+        "GITLAB_URL",
+        "gitlab-mr-service-mcp-py:local"
+      ],
+      "environment": {
+        "GITLAB_URL": "https://gitlab.com"
+      }
+    },
+    "kitty_terminal": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "KITTY_LISTEN_ON",
+        "-v",
+        "/tmp:/tmp",
+        "kitty-terminal-mcp:local"
+      ],
+      "environment": {
+        "KITTY_LISTEN_ON": "unix:/tmp/kitty-opencode.sock"
+      }
+    },
+    "datadog": {
+      "type": "remote",
+      "url": "https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp"
+    }
+  },
+  "tui": {
+    "theme": "opencode"
+  },
+  "plugin": [
+    "oh-my-opencode@3.7.4"
+  ]
+}
