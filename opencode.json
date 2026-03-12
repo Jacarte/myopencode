@@ -84,7 +84,8 @@
         "gitlab-mr-service-mcp-py:local"
       ],
       "environment": {
-        "GITLAB_URL": "https://gitlab.com"
+        "GITLAB_URL": "https://gitlab.com",
+        "GITLAB_TOKEN": "{env:GITLAB_TOKEN}"
       }
     },
     "kitty_terminal": {
