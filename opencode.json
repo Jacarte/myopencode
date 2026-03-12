@@ -93,7 +93,7 @@
       "enabled": true,
       "command": [
         "node",
-        "/Users/javcab/.config/opencode/mcps/kitty-terminal-mcp/server.mjs"
+        "{env:HOME}/.config/opencode/mcps/kitty-terminal-mcp/server.mjs"
       ],
       "environment": {
         "KITTY_LISTEN_ON": "unix:/tmp/kitten"
