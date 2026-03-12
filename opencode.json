@@ -92,18 +92,11 @@
       "type": "local",
       "enabled": true,
       "command": [
-        "docker",
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "KITTY_LISTEN_ON",
-        "-v",
-        "/tmp:/tmp",
-        "kitty-terminal-mcp:local"
+        "node",
+        "/Users/javcab/.config/opencode/mcps/kitty-terminal-mcp/server.mjs"
       ],
       "environment": {
-        "KITTY_LISTEN_ON": "unix:/tmp/kitty-opencode.sock"
+        "KITTY_LISTEN_ON": "unix:/tmp/kitten"
       }
     },
     "datadog": {
