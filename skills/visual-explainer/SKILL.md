@@ -378,11 +378,11 @@ bash {{skill_dir}}/scripts/share.sh ~/.agent/diagrams/my-diagram.html
 
 **How it works:**
 1. Copies HTML file to temp directory as `index.html`
-2. Deploys via the vercel-deploy skill (zero-auth claimable deployment)
+2. Deploys via the `vercel-deploy` helper script (zero-auth claimable deployment)
 3. URL is live immediately — works in any browser
 
 **Requirements:**
-- vercel-deploy skill (should be pre-installed; if not: `pi install npm:vercel-deploy`)
+- `vercel-deploy` helper required by `scripts/share.sh` (install with: `pi install npm:vercel-deploy`)
 
 **Notes:**
 - Deployments are public — anyone with the URL can view

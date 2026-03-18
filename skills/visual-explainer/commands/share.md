@@ -20,12 +20,12 @@ Share a visual explainer HTML file instantly via Vercel. Returns a live URL with
 ## How It Works
 
 1. Copies your HTML file to a temp directory as `index.html`
-2. Deploys via the vercel-deploy skill (no auth needed)
+2. Deploys via the `vercel-deploy` helper script (no auth needed)
 3. Returns a live URL immediately
 
 ## Requirements
 
-- **vercel-deploy skill** - Should be pre-installed. If not: `pi install npm:vercel-deploy`
+- **`vercel-deploy` helper** - Required by `scripts/share.sh`. Install with: `pi install npm:vercel-deploy`
 
 No Vercel account, Cloudflare account, or API keys needed. The deployment is "claimable" — you can transfer it to your Vercel account later if you want.
 

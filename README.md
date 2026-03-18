@@ -17,11 +17,10 @@ Personal [OpenCode](https://opencode.ai) configuration. Custom MCP servers, agen
 │   └── kitty-terminal-mcp/         # Kitty terminal read access (Node)
 ├── tools/
 │   └── gitlab-mr-service/          # Go HTTP API backing the GitLab MCP
-├── skills/                     # 8 agent skills
+├── skills/                     # 7 agent skills
 │   ├── go-reviewer/            # Go code review against team conventions
 │   ├── typescript-reviewer/    # TypeScript code review against team conventions
 │   ├── remote-mr-review/       # GitLab MR review workflow
-│   ├── gitlab_mr_operator/     # GitLab MR operations via REST/curl
 │   ├── visual-explainer/       # HTML visual explanations and diagrams
 │   ├── javier-writing-style/   # Technical blog post writing style
 │   ├── repo-evals-builder/     # AI eval suite generation from repo behavior
