@@ -20,6 +20,22 @@ Runtime endpoint contract expected by this plugin:
 
 By default, the plugin resolves `MEM0_SERVER_URL` to `http://localhost:8000`.
 
+## Hook integration summary
+
+The plugin integrates with OpenCode through four hooks that map to different phases of a session:
+
+- `chat.message`: runs on each user message. It detects recall intent or topic shift, retrieves ranked memories from mem0, and injects a bounded `[MEM0 CONTEXT]` block into the prompt parts.
+- `tool` (custom tool `mem0`): provides explicit memory operations (`add`, `search`, `list`, `forget`, `help`) so the assistant can persist and query high-signal memories on demand.
+- `experimental.session.compacting`: runs during session compaction and appends high-signal project memory (or replaces compaction prompt when configured) so durable context survives long sessions.
+- `event`: listens to runtime events such as `message.updated` (to archive finished compaction summaries as cold memory) and `session.deleted` (to clean per-session in-memory state).
+
+Operational flow in practice:
+
+1. User sends a message -> `chat.message` decides whether retrieval is worth it.
+2. If retrieval is triggered, mem0 search results are ranked, deduped, and injected under strict budget limits.
+3. If the model decides to store/retrieve explicitly, it calls the `mem0` tool through the plugin's custom tool hook.
+4. On compaction, `experimental.session.compacting` and `event` cooperate to preserve long-term continuity while keeping active context lean.
+
 ## Why this plugin exists
 
 OpenCode sessions are excellent at short-term reasoning, but they need help with durable continuity across sessions.
