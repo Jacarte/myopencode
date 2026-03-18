@@ -14,7 +14,7 @@ This plugin adds a practical memory model:
 - Tier 2 (Working): session-local, temporary memory control in plugin state
 - Tier 3 (Long-term): searchable mem0 persistence
 
-The core principle is: **inject less, retrieve smarter, persist only high-signal facts**.
+The core principle is: **inject less, retrieve smarter, persist only high-signal facts** the implementation of the mem0 plugin is inspired by the opencode-supermemory plugin.
 
 ## Why these design choices
 
