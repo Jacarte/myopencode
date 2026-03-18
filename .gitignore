@@ -1,0 +1,12 @@
+node_modules
+package.json
+bun.lock
+.opencode
+.ruff_cache
+
+# not my agents
+agent/ai_newsletter.md
+agent-browser/
+newsletter-history/
+logs.txt
+agent/
