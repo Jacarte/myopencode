@@ -12,8 +12,9 @@ Personal OpenCode CLI configuration. Defines AI providers, MCP integrations, cus
 ~/.config/opencode/
 ├── opencode.json           # Core config: providers, MCP servers, plugins
 ├── oh-my-opencode.json     # Agent ↔ model + category ↔ model mappings
+├── plugins/                # Local plugin implementations (mem0-functional, mem0server reference)
 ├── agent/                  # 7 custom agent definitions (→ see agent/AGENTS.md)
-├── skills/                 # Installed skills (currently: skill-creator)
+├── skills/                 # Installed skills (remote-mr-review, ts/go reviewers, visual-explainer, etc.)
 ├── commands/               # Custom slash commands (empty)
 ├── .opencode/              # Internal runtime state (SQLite DB, do NOT touch)
 ├── package.json            # Dependency: @opencode-ai/plugin 1.2.5
@@ -26,6 +27,7 @@ Personal OpenCode CLI configuration. Defines AI providers, MCP integrations, cus
 |------|----------|-------|
 | Add/change AI provider or model | `opencode.json` → `provider` | Format: `provider/model-name` |
 | Add/configure MCP server | `opencode.json` → `mcp` | Types: `local` (command) or `remote` (URL) |
+| Configure Mem0 plugin backend | `plugins/mem0-functional.ts` + `plugins/mem0server/README.md` | Set `MEM0_SERVER_URL` and run reference server |
 | Change agent model assignment | `oh-my-opencode.json` → `agents` | Agent names must match plugin expectations |
 | Change category model | `oh-my-opencode.json` → `categories` | 8 categories: visual-engineering, ultrabrain, deep, artistry, quick, unspecified-low/high, writing |
 | Create/edit custom agent | `agent/<name>.md` | YAML frontmatter required (see agent/AGENTS.md) |

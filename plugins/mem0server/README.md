@@ -2,6 +2,25 @@
 
 A FastAPI-based REST server for managing memories with mem0, a memory management system for AI agents and applications. This server provides a simple HTTP interface for storing, retrieving, searching, and managing memories with support for multiple AI providers and vector databases.
 
+## OpenCode Reference Implementation Context
+
+This server is the reference backend used by the local OpenCode memory plugin:
+
+- Plugin: `~/.config/opencode/plugins/mem0-functional.ts`
+- Plugin architecture notes: `~/.config/opencode/plugins/mem0-functional.md`
+- Plugin backend variable: `MEM0_SERVER_URL` (default `http://localhost:8000`)
+
+Quick start for plugin integration:
+
+```bash
+cd ~/.config/opencode/plugins/mem0server
+cp .env.example .env
+# set OPENAI_API_KEY in .env
+./start.sh
+
+export MEM0_SERVER_URL="http://localhost:8000"
+```
+
 ## Features
 
 - **Memory Management**: Create, read, update, and delete memories
@@ -372,4 +391,3 @@ Based on original source: https://code.m3ta.dev/m3tam3re/nixpkgs/src/branch/mast
 ## Support
 
 For issues with mem0 library itself, see: https://github.com/mem0ai/mem0
-

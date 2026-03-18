@@ -8,6 +8,10 @@ Personal [OpenCode](https://opencode.ai) configuration. Custom MCP servers, agen
 ~/.config/opencode/
 ├── opencode.json               # MCP servers, plugins, theme
 ├── oh-my-opencode.json         # Agent/category ↔ model routing
+├── plugins/
+│   ├── mem0-functional.ts          # Mem0 memory plugin loaded by OpenCode
+│   ├── mem0-functional.md          # Architecture notes for the plugin
+│   └── mem0server/                 # Reference Mem0 REST backend implementation
 ├── mcps/
 │   ├── gitlab-mr-service-mcp-py/   # GitLab MR operations (Python + Go, Docker)
 │   └── kitty-terminal-mcp/         # Kitty terminal read access (Node)
@@ -17,10 +21,10 @@ Personal [OpenCode](https://opencode.ai) configuration. Custom MCP servers, agen
 │   ├── go-reviewer/            # Go code review against team conventions
 │   ├── typescript-reviewer/    # TypeScript code review against team conventions
 │   ├── remote-mr-review/       # GitLab MR review workflow
+│   ├── gitlab_mr_operator/     # GitLab MR operations via REST/curl
 │   ├── visual-explainer/       # HTML visual explanations and diagrams
 │   ├── javier-writing-style/   # Technical blog post writing style
 │   ├── repo-evals-builder/     # AI eval suite generation from repo behavior
-│   ├── mem0-memory/            # Local Mem0 memory store/retrieve
 │   └── skill-creator/          # Guide for authoring new skills
 ├── agent/                      # Custom agent definitions (.gitignored)
 ├── commands/                   # Custom slash commands
@@ -66,6 +70,25 @@ The `oh-my-opencode` plugin routes agents and task categories to specific models
 | unspecified-low | claude-sonnet-4-6 |
 | unspecified-high | claude-opus-4-6 |
 | writing | gemini-3-flash-preview |
+
+## Mem0 Reference Implementation
+
+The repository includes a local Mem0 stack for the memory plugin:
+
+- Plugin: `plugins/mem0-functional.ts`
+- Backend reference server: `plugins/mem0server/README.md`
+- Default backend URL used by the plugin: `MEM0_SERVER_URL` (defaults to `http://localhost:8000`)
+
+Quick start:
+
+```bash
+cd ~/.config/opencode/plugins/mem0server
+cp .env.example .env
+# set OPENAI_API_KEY in .env
+./start.sh
+
+export MEM0_SERVER_URL="http://localhost:8000"
+```
 
 ## Security
 

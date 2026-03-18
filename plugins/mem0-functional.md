@@ -4,6 +4,22 @@ This document explains why the plugin is designed the way it is, not just what e
 
 File: `~/.config/opencode/plugins/mem0-functional.ts`
 
+## Reference backend implementation
+
+This plugin is wired to a local reference server implementation at:
+
+- `~/.config/opencode/plugins/mem0server/`
+- Server docs: `~/.config/opencode/plugins/mem0server/README.md`
+
+Runtime endpoint contract expected by this plugin:
+
+- `POST /memories`
+- `POST /search`
+- `GET /memories`
+- `DELETE /memories/{memory_id}`
+
+By default, the plugin resolves `MEM0_SERVER_URL` to `http://localhost:8000`.
+
 ## Why this plugin exists
 
 OpenCode sessions are excellent at short-term reasoning, but they need help with durable continuity across sessions.
