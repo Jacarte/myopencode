@@ -82,7 +82,7 @@ def predict(self, data):
 def predict(self, data):
     """
     Given dataframe, uses the model to predict labels.
-    
+
     Parameters
     ----------
     data : pandas.DataFrame
@@ -242,22 +242,22 @@ Before writing, answer:
 
 ## Common Anti-Patterns to Avoid
 
-❌ **Starting with the solution** — Reader doesn't know why it matters yet  
+❌ **Starting with the solution** — Reader doesn't know why it matters yet
 ✅ **Start with the problem** — Establish context first
 
-❌ **Hiding complexity** — Readers don't understand trade-offs  
+❌ **Hiding complexity** — Readers don't understand trade-offs
 ✅ **Embrace complexity** — Explain it clearly, acknowledge limitations
 
-❌ **Vague improvements** — "Much faster", "Better performance"  
+❌ **Vague improvements** — "Much faster", "Better performance"
 ✅ **Quantify everything** — "90–95% reduction", "12 seconds vs 2 minutes"
 
-❌ **Incomplete code examples** — Reader can't reproduce  
+❌ **Incomplete code examples** — Reader can't reproduce
 ✅ **Full, production-ready examples** — Include configs, certificates, setup steps
 
-❌ **Dismissing alternatives** — Reader mistrusts your judgment  
+❌ **Dismissing alternatives** — Reader mistrusts your judgment
 ✅ **Honest comparison** — Why other approaches fall short, what they do well
 
-❌ **Avoiding limitations** — Readers adopt blindly  
+❌ **Avoiding limitations** — Readers adopt blindly
 ✅ **Openly acknowledge limitations** — Who should and shouldn't use this
 
 ---

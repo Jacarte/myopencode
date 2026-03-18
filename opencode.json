@@ -80,6 +80,17 @@
         "KITTY_LISTEN_ON": "unix:/tmp/kitten"
       }
     },
+    "gitlab": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "node",
+        "{env:HOME}/.config/opencode/mcps/gitlab-mr-service-mcp-node/server.mjs"
+      ],
+      "environment": {
+        "GITLAB_TOKEN": "{env:GITLAB_TOKEN}"
+      }
+    },
     "datadog": {
       "type": "remote",
       "url": "https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp"
