@@ -2,6 +2,8 @@
 
 MCP server that exposes read-oriented tools for [Kitty](https://sw.kovidgoyal.net/kitty/) terminal output. Lets AI agents list windows/tabs, read terminal text, and tail logs via the Kitty remote control protocol.
 
+Repository-level local plugin references (including Mem0 server integration) are documented in `~/.config/opencode/README.md`.
+
 ## Prerequisites
 
 Kitty must have remote control enabled. Add to your `kitty.conf` or `macos-launch-services-cmdline`:
