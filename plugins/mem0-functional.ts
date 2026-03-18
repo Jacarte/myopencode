@@ -10,7 +10,16 @@ const MEM0_LOG_INJECTION_CONTENT = process.env.MEM0_LOG_INJECTION_CONTENT === "1
 const MEM0_COLD_MAX_CHARS = Number(process.env.MEM0_COLD_MAX_CHARS || 6000);
 const MEM0_API_MAX_ATTEMPTS = 3;
 const MEM0_API_RETRY_DELAY_MS = 250;
-const REQUEST_TIMEOUT_MS = 8_000;
+const MEM0_REFRESH_EVERY_TURNS = Number(process.env.MEM0_REFRESH_EVERY_TURNS || 6);
+const MEM0_AUTO_RETRIEVE_FIRST_TURN = process.env.MEM0_AUTO_RETRIEVE_FIRST_TURN !== "0";
+const MEM0_MAX_INJECT_CHARS = Number(process.env.MEM0_MAX_INJECT_CHARS || 2200);
+const MEM0_MAX_RECENT_IDS = Number(process.env.MEM0_MAX_RECENT_IDS || 40);
+const MEM0_SIMILARITY_DEDUPE_THRESHOLD = Number(process.env.MEM0_SIMILARITY_DEDUPE_THRESHOLD || 0.92);
+const MEM0_SUPERSEDES_THRESHOLD = Number(process.env.MEM0_SUPERSEDES_THRESHOLD || 0.88);
+const MEM0_BREAKER_THRESHOLD = Number(process.env.MEM0_BREAKER_THRESHOLD || 3);
+const MEM0_BREAKER_COOLDOWN_MS = Number(process.env.MEM0_BREAKER_COOLDOWN_MS || 20_000);
+const MEM0_READ_TIMEOUT_MS = Number(process.env.MEM0_READ_TIMEOUT_MS || 8_000);
+const MEM0_WRITE_TIMEOUT_MS = Number(process.env.MEM0_WRITE_TIMEOUT_MS || 45_000);
 const MAX_CONTEXT_ITEMS = 6;
 
 type Scope = "user" | "project" | "agent" | "environment";
@@ -22,6 +31,35 @@ interface MemoryResult {
   content: string;
   score?: number;
   metadata?: JsonRecord;
+}
+
+interface MemoryCandidate extends MemoryResult {
+  scope: Scope;
+  type: string;
+  fingerprint: string;
+  createdAt?: number;
+  ttlExpiresAt?: number;
+  decayHalfLifeDays?: number;
+  inject: boolean;
+  semantic: number;
+  rankScore: number;
+}
+
+interface SessionState {
+  turn: number;
+  lastInjectionTurn: number;
+  topicSignature: string;
+  injectedMemoryIdsLRU: string[];
+  workingSet: MemoryCandidate[];
+  lastGoodContextSnippet: string;
+}
+
+interface PluginMetrics {
+  retrievalAttempts: number;
+  retrievalHits: number;
+  dedupeDrops: number;
+  budgetDrops: number;
+  breakerOpens: number;
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -49,6 +87,98 @@ function clampText(text: string, maxChars: number): string {
 function preview(text: string, maxChars = 220): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}...`;
 }
+
+function parseTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const asNum = Number(value);
+    if (Number.isFinite(asNum)) return asNum;
+    const asDate = Date.parse(value);
+    if (Number.isFinite(asDate)) return asDate;
+  }
+  return undefined;
+}
+
+function normalizeText(content: string): string {
+  return content.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function tokenize(content: string): string[] {
+  return normalizeText(content)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 2);
+}
+
+function tokenSimilarity(left: string, right: string): number {
+  const leftSet = new Set(tokenize(left));
+  const rightSet = new Set(tokenize(right));
+  if (leftSet.size === 0 || rightSet.size === 0) return 0;
+  let overlap = 0;
+  for (const token of leftSet) {
+    if (rightSet.has(token)) overlap += 1;
+  }
+  const union = leftSet.size + rightSet.size - overlap;
+  return union === 0 ? 0 : overlap / union;
+}
+
+function contentFingerprint(content: string): string {
+  return sha(normalizeText(content));
+}
+
+function topicSignature(content: string): string {
+  const ignored = new Set(["this", "that", "with", "from", "have", "what", "when", "where", "which", "would", "could", "should"]);
+  const counts = new Map<string, number>();
+  for (const token of tokenize(content)) {
+    if (ignored.has(token)) continue;
+    counts.set(token, (counts.get(token) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([token]) => token)
+    .sort()
+    .join(" ");
+}
+
+function shouldRefreshForTopicShift(previousSignature: string, currentSignature: string): boolean {
+  if (!previousSignature || !currentSignature) return false;
+  return tokenSimilarity(previousSignature, currentSignature) < 0.35;
+}
+
+function deriveHalfLifeDays(type: string): number {
+  if (type === "decision" || type === "stable-fact") return 120;
+  if (type === "procedure") return 60;
+  if (type === "problem-fix") return 45;
+  return 30;
+}
+
+function computeRecencyScore(candidate: MemoryCandidate): number {
+  const createdAt = candidate.createdAt;
+  if (!createdAt) return 0.5;
+  const ageDays = Math.max(0, (Date.now() - createdAt) / 86_400_000);
+  const halfLife = candidate.decayHalfLifeDays || deriveHalfLifeDays(candidate.type);
+  const decay = 0.5 ** (ageDays / halfLife);
+  const ttlExpired = candidate.ttlExpiresAt && Date.now() > candidate.ttlExpiresAt;
+  return ttlExpired ? decay * 0.25 : decay;
+}
+
+function typeWeight(type: string): number {
+  if (type === "decision") return 1;
+  if (type === "stable-fact") return 0.95;
+  if (type === "procedure") return 0.9;
+  if (type === "problem-fix") return 0.8;
+  return 0.6;
+}
+
+function scopeBoost(scope: Scope): number {
+  if (scope === "project") return 1;
+  if (scope === "user") return 0.9;
+  if (scope === "agent") return 0.8;
+  return 0.75;
+}
+
+const RECALL_INTENT_PATTERN = /\b(recall|what\s+did\s+we\s+decide|what\s+did\s+i\s+say|previously|earlier|past\s+decision|history|refresh\s+memory)\b/i;
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -159,16 +289,38 @@ function normalizeResults(payload: unknown): MemoryResult[] {
     .filter((item: { id: string; content: string }) => item.id && item.content);
 }
 
+let mem0BreakerFailures = 0;
+let mem0BreakerOpenUntil = 0;
+let mem0BreakerOpenCount = 0;
+
+function timeoutForRequest(path: string, init: RequestInit): number {
+  const method = String(init.method || "GET").toUpperCase();
+  if (path === "/search" && method === "POST") {
+    return MEM0_READ_TIMEOUT_MS;
+  }
+  if (method === "GET") {
+    return MEM0_READ_TIMEOUT_MS;
+  }
+  return MEM0_WRITE_TIMEOUT_MS;
+}
+
 async function mem0Request(path: string, init: RequestInit): Promise<unknown> {
   if (!MEM0_SERVER_URL) {
     throw new Error("MEM0_SERVER_URL is not set");
   }
 
+  if (Date.now() < mem0BreakerOpenUntil) {
+    throw new Error(`mem0 circuit breaker open until ${new Date(mem0BreakerOpenUntil).toISOString()}`);
+  }
+
   let lastError: Error | null = null;
+  let lastTimeoutMs = MEM0_READ_TIMEOUT_MS;
 
   for (let attempt = 1; attempt <= MEM0_API_MAX_ATTEMPTS; attempt += 1) {
+    const timeoutMs = timeoutForRequest(path, init);
+    lastTimeoutMs = timeoutMs;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(`${MEM0_SERVER_URL}${path}`, {
@@ -188,6 +340,7 @@ async function mem0Request(path: string, init: RequestInit): Promise<unknown> {
         throw new Error(String(parsedObj?.detail || parsedObj?.error || `mem0 request failed (${response.status})`));
       }
 
+      mem0BreakerFailures = 0;
       return parsed;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -202,7 +355,16 @@ async function mem0Request(path: string, init: RequestInit): Promise<unknown> {
     }
   }
 
-  throw new Error(`mem0 request failed after ${MEM0_API_MAX_ATTEMPTS} attempts: ${lastError?.message || "unknown error"}`);
+  mem0BreakerFailures += 1;
+  if (mem0BreakerFailures >= MEM0_BREAKER_THRESHOLD) {
+    mem0BreakerOpenUntil = Date.now() + MEM0_BREAKER_COOLDOWN_MS;
+    mem0BreakerFailures = 0;
+    mem0BreakerOpenCount += 1;
+  }
+
+  throw new Error(
+    `mem0 request failed after ${MEM0_API_MAX_ATTEMPTS} attempts (timeout=${lastTimeoutMs}ms): ${lastError?.message || "unknown error"}`
+  );
 }
 
 async function searchScope(
@@ -225,13 +387,57 @@ async function searchScope(
   return normalizeResults(payload).slice(0, limit);
 }
 
-function formatContextSection(title: string, rows: Array<{ content: string; score?: number }>): string {
-  if (rows.length === 0) return "";
-  const lines = rows.map((row) => {
-    const score = typeof row.score === "number" ? ` [${Math.round(row.score * 100)}%]` : "";
-    return `- ${score} ${row.content}`.replace(/\s+/g, " ").trim();
-  });
-  return `\n${title}:\n${lines.join("\n")}`;
+function asScope(value: unknown): Scope | undefined {
+  if (value === "user" || value === "project" || value === "agent" || value === "environment") return value;
+  return undefined;
+}
+
+function toCandidate(scope: Scope, row: MemoryResult): MemoryCandidate {
+  const metadata = row.metadata || {};
+  const metadataScope = asScope(metadata.scope);
+  const createdAt = parseTimestamp(metadata.created_at || metadata.createdAt);
+  const ttlExpiresAt = parseTimestamp(metadata.ttl_expires_at || metadata.ttlExpiresAt);
+  const decayHalfLifeDays = typeof metadata.decay_half_life_days === "number"
+    ? metadata.decay_half_life_days
+    : typeof metadata.decayHalfLifeDays === "number"
+      ? metadata.decayHalfLifeDays
+      : undefined;
+  const type = typeof metadata.type === "string" ? metadata.type : "unknown";
+  const inject = metadata.inject !== false;
+  const semantic = typeof row.score === "number" ? row.score : 0.5;
+
+  return {
+    ...row,
+    scope: metadataScope || scope,
+    type,
+    fingerprint: typeof metadata.fingerprint === "string" ? metadata.fingerprint : contentFingerprint(row.content),
+    createdAt,
+    ttlExpiresAt,
+    decayHalfLifeDays,
+    inject,
+    semantic,
+    rankScore: 0,
+  };
+}
+
+function rankCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
+  return candidates
+    .map((candidate) => {
+      const recency = computeRecencyScore(candidate);
+      const weighted = 0.6 * candidate.semantic + 0.2 * recency + 0.15 * typeWeight(candidate.type) + 0.05 * scopeBoost(candidate.scope);
+      return {
+        ...candidate,
+        rankScore: weighted,
+      };
+    })
+    .sort((left, right) => right.rankScore - left.rankScore);
+}
+
+function updateLRU(list: string[], id: string): string[] {
+  const filtered = list.filter((item) => item !== id);
+  filtered.push(id);
+  if (filtered.length <= MEM0_MAX_RECENT_IDS) return filtered;
+  return filtered.slice(filtered.length - MEM0_MAX_RECENT_IDS);
 }
 
 const MEMORY_NUDGE = `[MEM0 MEMORY TRIGGER]
@@ -244,8 +450,40 @@ Use the \`mem0\` tool with \`mode: "add"\` and save only high-signal knowledge:
 Do NOT save raw conversations or temporary reasoning.`;
 
 export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
-  const injectedSessions = new Set<string>();
+  const sessionState = new Map<string, SessionState>();
+  const sessionDirectory = new Map<string, string>();
   const coldCompactionPending = new Set<string>();
+  const metrics: PluginMetrics = {
+    retrievalAttempts: 0,
+    retrievalHits: 0,
+    dedupeDrops: 0,
+    budgetDrops: 0,
+    breakerOpens: 0,
+  };
+
+  function getSessionState(sessionID: string): SessionState {
+    const existing = sessionState.get(sessionID);
+    if (existing) return existing;
+    const created: SessionState = {
+      turn: 0,
+      lastInjectionTurn: 0,
+      topicSignature: "",
+      injectedMemoryIdsLRU: [],
+      workingSet: [],
+      lastGoodContextSnippet: "",
+    };
+    sessionState.set(sessionID, created);
+    return created;
+  }
+
+  function setSessionDirectory(sessionID: string, directory?: string): void {
+    if (!directory) return;
+    sessionDirectory.set(sessionID, directory);
+  }
+
+  function getSessionDirectory(sessionID: string): string {
+    return sessionDirectory.get(sessionID) || ctx.directory;
+  }
 
   async function logInjection(message: string, extra?: JsonRecord): Promise<void> {
     if (!MEM0_LOG_INJECTION) return;
@@ -253,15 +491,121 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
       await ctx.client.app.log({
         body: {
           service: "mem0-functional-plugin",
-          level: "info",
-          message,
-          extra,
-        },
-        query: { directory: ctx.directory },
+            level: "info",
+            message,
+            extra: {
+              ...extra,
+              metrics,
+              breakerOpenCount: mem0BreakerOpenCount,
+            },
+          },
+          query: { directory: ctx.directory },
       });
     } catch {
       return;
     }
+  }
+
+  async function detectSupersedes(content: string, type: string, scope: Scope, directory: string): Promise<string[]> {
+    const related = await searchScope(content.slice(0, 220), scope, directory, undefined, 12);
+    const supersedes: string[] = [];
+    for (const row of related) {
+      const existingType = typeof row.metadata?.type === "string" ? row.metadata.type : undefined;
+      if (existingType && existingType !== type) continue;
+      if (tokenSimilarity(content, row.content) >= MEM0_SUPERSEDES_THRESHOLD) {
+        supersedes.push(row.id);
+      }
+    }
+    return supersedes;
+  }
+
+  async function retrieveRankedCandidates(query: string, directory: string, agent?: string): Promise<MemoryCandidate[]> {
+    metrics.retrievalAttempts += 1;
+    const [userMemories, projectMemories, agentMemories, environmentMemories] = await Promise.all([
+      searchScope(query, "user", directory, agent, MAX_CONTEXT_ITEMS),
+      searchScope(query, "project", directory, agent, MAX_CONTEXT_ITEMS),
+      searchScope(query, "agent", directory, agent, MAX_CONTEXT_ITEMS),
+      searchScope(query, "environment", directory, agent, MAX_CONTEXT_ITEMS),
+    ]);
+
+    const candidates = [
+      ...userMemories.map((row) => toCandidate("user", row)),
+      ...projectMemories.map((row) => toCandidate("project", row)),
+      ...agentMemories.map((row) => toCandidate("agent", row)),
+      ...environmentMemories.map((row) => toCandidate("environment", row)),
+    ].filter((candidate) => candidate.inject && candidate.type !== "noise" && candidate.content.length > 0);
+
+    if (candidates.length > 0) {
+      metrics.retrievalHits += 1;
+    }
+
+    return rankCandidates(candidates);
+  }
+
+  function buildContextText(candidates: MemoryCandidate[]): string {
+    const grouped: Record<Scope, MemoryCandidate[]> = {
+      user: [],
+      project: [],
+      agent: [],
+      environment: [],
+    };
+
+    for (const candidate of candidates) {
+      grouped[candidate.scope].push(candidate);
+    }
+
+    const sections = [
+      { scope: "user" as const, title: "User Context" },
+      { scope: "project" as const, title: "Project Context" },
+      { scope: "agent" as const, title: "Agent Context" },
+      { scope: "environment" as const, title: "Environment Context" },
+    ]
+      .map(({ scope, title }) => {
+        const rows = grouped[scope];
+        if (rows.length === 0) return "";
+        const lines = rows.map((row) => `- [${row.type}] ${row.content}`);
+        return `${title}:\n${lines.join("\n")}`;
+      })
+      .filter(Boolean);
+
+    return `[MEM0 CONTEXT]\n${sections.join("\n\n")}`;
+  }
+
+  function selectForInjection(ranked: MemoryCandidate[], session: SessionState): MemoryCandidate[] {
+    const selected: MemoryCandidate[] = [];
+    const seenFingerprints = new Set<string>();
+    let usedChars = "[MEM0 CONTEXT]\n".length;
+
+    for (const candidate of ranked) {
+      if (selected.length >= MAX_CONTEXT_ITEMS) {
+        metrics.budgetDrops += 1;
+        break;
+      }
+      if (session.injectedMemoryIdsLRU.includes(candidate.id)) {
+        metrics.dedupeDrops += 1;
+        continue;
+      }
+      if (seenFingerprints.has(candidate.fingerprint)) {
+        metrics.dedupeDrops += 1;
+        continue;
+      }
+      const nearDuplicate = selected.some((row) => tokenSimilarity(row.content, candidate.content) >= MEM0_SIMILARITY_DEDUPE_THRESHOLD);
+      if (nearDuplicate) {
+        metrics.dedupeDrops += 1;
+        continue;
+      }
+      const nextCost = candidate.content.length + 40;
+      if (usedChars + nextCost > MEM0_MAX_INJECT_CHARS) {
+        metrics.budgetDrops += 1;
+        continue;
+      }
+
+      usedChars += nextCost;
+      seenFingerprints.add(candidate.fingerprint);
+      selected.push(candidate);
+    }
+
+    return selected;
   }
 
   async function saveColdCompactionMemory(sessionID: string, messageID: string, directoryHint?: string): Promise<void> {
@@ -289,9 +633,15 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
             source: "opencode-plugin",
             scope: "project",
             type: "compaction-archive",
+            tier: "long-term",
             cold_context: true,
             inject: false,
             session_id: sessionID,
+            created_at: new Date().toISOString(),
+            last_used_at: new Date().toISOString(),
+            access_count: 0,
+            fingerprint: contentFingerprint(boundedSummary),
+            decay_half_life_days: deriveHalfLifeDays("compaction-archive"),
           },
         }),
       });
@@ -310,6 +660,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
     "chat.message": async (input, output) => {
       if (!MEM0_SERVER_URL) return;
 
+      const activeDirectory = getSessionDirectory(input.sessionID);
+
       const textParts = output.parts.filter(
         (part): part is Part & { type: "text"; text: string } => part.type === "text" && typeof part.text === "string"
       );
@@ -317,6 +669,9 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 
       const userMessage = textParts.map((part) => part.text).join("\n").trim();
       if (!userMessage) return;
+
+      const state = getSessionState(input.sessionID);
+      state.turn += 1;
 
       if (MEMORY_KEYWORD_PATTERN.test(removeCodeParts(userMessage))) {
         const nudgePart: Part = {
@@ -336,51 +691,65 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         });
       }
 
-      if (injectedSessions.has(input.sessionID)) return;
-      injectedSessions.add(input.sessionID);
+      const signature = topicSignature(userMessage);
+      const recallIntent = RECALL_INTENT_PATTERN.test(removeCodeParts(userMessage));
+      const firstTurn = state.turn === 1 && MEM0_AUTO_RETRIEVE_FIRST_TURN;
+      const periodicRefresh = state.lastInjectionTurn > 0 && state.turn - state.lastInjectionTurn >= MEM0_REFRESH_EVERY_TURNS;
+      const topicShift = shouldRefreshForTopicShift(state.topicSignature, signature);
+      const shouldRetrieve = firstTurn || recallIntent || periodicRefresh || topicShift;
+
+      state.topicSignature = signature;
+      if (!shouldRetrieve) return;
 
       try {
-        // WHY: First-turn injection restores durable memory context early,
-        // so the agent does not need to rediscover established constraints.
-        const [userMemories, projectMemories, agentMemories, environmentMemories] = await Promise.all([
-          searchScope(userMessage, "user", ctx.directory, input.agent),
-          searchScope(userMessage, "project", ctx.directory, input.agent),
-          searchScope(userMessage, "agent", ctx.directory, input.agent),
-          searchScope(userMessage, "environment", ctx.directory, input.agent),
-        ]);
-
-        const sections = [
-          formatContextSection("User Context", userMemories),
-          formatContextSection("Project Context", projectMemories),
-          formatContextSection("Agent Context", agentMemories),
-          formatContextSection("Environment Context", environmentMemories),
-        ].filter(Boolean);
-
-        if (sections.length === 0) return;
+        const ranked = await retrieveRankedCandidates(userMessage, activeDirectory, input.agent);
+        const selected = selectForInjection(ranked, state);
+        if (selected.length === 0) return;
+        const contextText = buildContextText(selected);
 
         const contextPart: Part = {
           id: createPartID("context"),
           sessionID: input.sessionID,
           messageID: output.message.id,
           type: "text",
-          text: `[MEM0 CONTEXT]\n${sections.join("\n")}`,
+          text: contextText,
           synthetic: true,
         };
         output.parts.unshift(contextPart);
+
+        state.lastInjectionTurn = state.turn;
+        state.workingSet = selected;
+        state.lastGoodContextSnippet = contextText;
+        for (const memory of selected) {
+          state.injectedMemoryIdsLRU = updateLRU(state.injectedMemoryIdsLRU, memory.id);
+        }
+
         await logInjection("memory context injected", {
           sessionID: input.sessionID,
           messageID: output.message.id,
           partID: contextPart.id,
-          sections: sections.length,
-          memories: {
-            user: userMemories.length,
-            project: projectMemories.length,
-            agent: agentMemories.length,
-            environment: environmentMemories.length,
-          },
+          reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
+          selected: selected.length,
           text: MEM0_LOG_INJECTION_CONTENT ? preview(contextPart.text) : undefined,
         });
-      } catch {
+      } catch (error) {
+        if (state.lastGoodContextSnippet) {
+          const fallbackPart: Part = {
+            id: createPartID("fallback-context"),
+            sessionID: input.sessionID,
+            messageID: output.message.id,
+            type: "text",
+            text: `[MEM0 CONTEXT FALLBACK]\n${state.lastGoodContextSnippet}`,
+            synthetic: true,
+          };
+          output.parts.unshift(fallbackPart);
+          await logInjection("memory fallback context injected", {
+            sessionID: input.sessionID,
+            messageID: output.message.id,
+            partID: fallbackPart.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         // WHY: Memory retrieval must degrade gracefully; chat flow should never fail
         // just because the memory server is unavailable.
         return;
@@ -420,7 +789,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           const ids = scopeIdentifiers(scope, toolContext.directory, undefined);
 
           try {
-            if (mode === "help") {
+        if (mode === "help") {
               return JSON.stringify({
                 success: true,
                 modes: ["add", "search", "list", "forget", "help"],
@@ -430,6 +799,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
             }
 
             if (mode === "add") {
+              setSessionDirectory(toolContext.sessionID, toolContext.directory);
               if (!args.content) {
                 return JSON.stringify({ success: false, error: "content is required for add mode" });
               }
@@ -444,6 +814,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                 return JSON.stringify({ success: true, skipped: true, reason: quality.reason });
               }
 
+              const supersedes = await detectSupersedes(sanitized, quality.type, scope, toolContext.directory);
+
               const payload = await mem0Request("/memories", {
                 method: "POST",
                 body: JSON.stringify({
@@ -453,7 +825,15 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                     source: "opencode-plugin",
                     scope,
                     type: quality.type,
+                    tier: "long-term",
                     project_id: resolveProjectID(toolContext.directory),
+                    created_at: new Date().toISOString(),
+                    last_used_at: new Date().toISOString(),
+                    access_count: 0,
+                    fingerprint: contentFingerprint(sanitized),
+                    decay_half_life_days: deriveHalfLifeDays(quality.type),
+                    inject: true,
+                    supersedes,
                   },
                 }),
               });
@@ -465,10 +845,14 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                 type: quality.type,
                 reason: quality.reason,
                 id: payloadData?.id,
+                identifiers: ids,
+                project_id: resolveProjectID(toolContext.directory),
+                supersedes,
               });
             }
 
             if (mode === "search") {
+              setSessionDirectory(toolContext.sessionID, toolContext.directory);
               if (!args.query) {
                 return JSON.stringify({ success: false, error: "query is required for search mode" });
               }
@@ -492,6 +876,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
             }
 
             if (mode === "list") {
+              setSessionDirectory(toolContext.sessionID, toolContext.directory);
               const query = new URLSearchParams();
               query.set("user_id", ids.user_id);
               query.set("agent_id", ids.agent_id);
@@ -502,6 +887,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
             }
 
             if (mode === "forget") {
+              setSessionDirectory(toolContext.sessionID, toolContext.directory);
               if (!args.memoryId) {
                 return JSON.stringify({ success: false, error: "memoryId is required for forget mode" });
               }
@@ -524,6 +910,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
     "experimental.session.compacting": async (_input, output) => {
       if (!MEM0_SERVER_URL) return;
 
+      const activeDirectory = getSessionDirectory(_input.sessionID);
+
       if (MEM0_SAVE_COLD_COMPACTION) {
         coldCompactionPending.add(_input.sessionID);
       }
@@ -532,7 +920,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         const projectMemories = await searchScope(
           "recent decisions fixes constraints procedures",
           "project",
-          ctx.directory,
+          activeDirectory,
           undefined,
           8
         );
@@ -590,6 +978,10 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         const pathInfo = asRecord(info?.path);
         const directoryHint = typeof pathInfo?.cwd === "string" ? pathInfo.cwd : undefined;
 
+        if (sessionID) {
+          setSessionDirectory(sessionID, directoryHint);
+        }
+
         if (
           sessionID &&
           messageID &&
@@ -611,7 +1003,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         const sessionInfo = asRecord(props?.info);
         const sessionID = typeof sessionInfo?.id === "string" ? sessionInfo.id : undefined;
         if (sessionID) {
-          injectedSessions.delete(sessionID);
+          sessionState.delete(sessionID);
+          sessionDirectory.delete(sessionID);
           coldCompactionPending.delete(sessionID);
         }
       }

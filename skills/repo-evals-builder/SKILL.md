@@ -13,6 +13,19 @@ Build evaluation tasks from repository evidence, not guesswork.
 
 Use this skill to inspect the folder where the user launched the session, identify where AI is used, mine logs for real failures, and output a practical eval suite plan.
 
+## Tool Target Selection (MANDATORY)
+
+Before generating eval artifacts, determine the target eval platform.
+
+1. If the user already named a platform (`langfuse`, `promptfoo`, `braintrust`, or custom), proceed with that target.
+2. If not specified, ask exactly one question:
+   - "Which eval platform should I generate for: langfuse, promptfoo, braintrust, or custom?"
+3. Do not generate platform files until target is confirmed.
+
+Default recommendation when user asks for guidance:
+- Recommend `langfuse` for timeline tracking and experiment history.
+- Recommend `promptfoo` for CI-first prompt and regression checks.
+
 ## Core Principles
 
 Follow Anthropic's eval guidance:
@@ -33,6 +46,11 @@ Collect these inputs before task synthesis:
 If logs are not provided, still produce a repo-only draft suite and flag missing evidence.
 
 ## Workflow
+
+### 0) Confirm Eval Target
+
+- Capture selected target as `eval_target`.
+- If `eval_target=custom`, ask for required output schema or expected runner format.
 
 ### 1) Map AI Surface Area
 
@@ -104,13 +122,48 @@ Use defaults if missing:
 - Regression: low variance, stricter consistency target.
 - Capability: lower initial pass rate is acceptable.
 
-### 6) Output Artifacts
+### 6) Generate Tool-Specific Eval Data
 
-Always return these artifacts:
+Always generate common analysis artifacts plus target-specific data files.
+
+Common artifacts (all targets):
 1. AI usage analysis summary.
 2. Failure-mode catalog with evidence.
-3. Eval task list in YAML using the template in `references/TASK_TEMPLATE.md`.
-4. Prioritized rollout plan:
+3. Prioritized rollout plan:
+   - Immediate regression set (ship blocker)
+   - Capability set (hill-climbing)
+   - Missing instrumentation to add
+
+Target-specific artifacts:
+
+- `langfuse`
+  - Dataset JSON (`langfuse/<suite>.dataset.json`)
+  - Score config JSON (`langfuse/<suite>.score-config.json`)
+  - Runner script (prefer Python) for `run_experiment`
+  - Optional dataset runner script for `dataset.run_experiment`
+
+- `promptfoo`
+  - Promptfoo config (`promptfoo/promptfooconfig.yaml`)
+  - Test cases and assertions mapped from failure modes
+  - Optional provider config and CI command examples
+
+- `braintrust`
+  - Dataset fixture (`braintrust/<suite>.jsonl`)
+  - Eval runner script (Python/TS)
+  - Scorers mapped from deterministic + rubric checks
+
+- `custom`
+  - Emit in user-requested schema only.
+  - If schema is unknown, provide neutral eval task YAML and clearly mark conversion gap.
+
+### 7) Output Artifacts
+
+Always return these artifacts:
+1. `eval_target` and why it was selected.
+2. AI usage analysis summary.
+3. Failure-mode catalog with evidence.
+4. Tool-specific eval data files with concrete paths.
+5. Prioritized rollout plan:
    - Immediate regression set (ship blocker)
    - Capability set (hill-climbing)
    - Missing instrumentation to add
@@ -118,11 +171,13 @@ Always return these artifacts:
 ## Output Format
 
 When responding, use this order:
-1. `AI Usage Map`
-2. `Failure Modes from Logs`
-3. `Proposed Eval Suite`
-4. `Top 5 Tasks to Implement First`
-5. `Instrumentation Gaps`
+1. `Eval Target`
+2. `AI Usage Map`
+3. `Failure Modes from Logs`
+4. `Proposed Eval Suite`
+5. `Tool-Specific Eval Data`
+6. `Top 5 Tasks to Implement First`
+7. `Instrumentation Gaps`
 
 Keep tasks concrete enough that an engineer can implement them directly in an eval harness.
 
@@ -133,8 +188,12 @@ Keep tasks concrete enough that an engineer can implement them directly in an ev
 - Do not output only capability tasks; include regression tasks.
 - Do not rely only on LLM graders when deterministic checks are available.
 - Do not stop at generic advice; produce actual task specs.
+- Do not emit the wrong artifact format for the chosen `eval_target`.
+- Do not silently default to a platform when the user has not chosen one.
 
 ## Reference
 
 For schema and examples, read:
 - [TASK_TEMPLATE.md](references/TASK_TEMPLATE.md)
+- [LANGFUSE_TEMPLATE.md](references/LANGFUSE_TEMPLATE.md)
+- [PROMPTFOO_TEMPLATE.md](references/PROMPTFOO_TEMPLATE.md)
