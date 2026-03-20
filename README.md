@@ -13,10 +13,8 @@ Personal [OpenCode](https://opencode.ai) configuration. Custom MCP servers, agen
 │   ├── mem0-functional.md          # Architecture notes for the plugin
 │   └── mem0server/                 # Reference Mem0 REST backend implementation
 ├── mcps/
-│   ├── gitlab-mr-service-mcp-py/   # GitLab MR operations (Python + Go, Docker)
+│   ├── gitlab-mr-service-mcp-node/ # GitLab MR operations (Node.js native, no wrapper)
 │   └── kitty-terminal-mcp/         # Kitty terminal read access (Node)
-├── tools/
-│   └── gitlab-mr-service/          # Go HTTP API backing the GitLab MCP
 ├── skills/                     # 7 agent skills
 │   ├── go-reviewer/            # Go code review against team conventions
 │   ├── typescript-reviewer/    # TypeScript code review against team conventions
@@ -34,7 +32,7 @@ Personal [OpenCode](https://opencode.ai) configuration. Custom MCP servers, agen
 
 | Server | Type | Transport | Purpose |
 |--------|------|-----------|---------|
-| `gitlab_mr_service` | custom | Docker | GitLab MR list/get/create/diff/review |
+| `gitlab_mr_service` | custom | Node.js stdio | GitLab MR list/get/create/diff/review (native client, no wrapper) |
 | `kitty_terminal` | custom | Node (native) | Read Kitty terminal windows and logs |
 | `slack` | custom | Python | Slack channel read/post |
 | `atlassian` | remote | OAuth | Confluence + Jira |
@@ -106,8 +104,8 @@ No secrets are committed. All credentials use `{env:...}` substitution:
 # Install plugin dependency
 cd ~/.config/opencode && npm install
 
-# Build Docker-based MCPs
-docker build -t gitlab-mr-service-mcp-py:local -f mcps/gitlab-mr-service-mcp-py/Dockerfile .
+# Install GitLab MCP dependencies (Node.js native)
+cd mcps/gitlab-mr-service-mcp-node && npm install
 
 # Kitty MCP runs natively (macOS can't share Unix sockets with Docker)
 cd mcps/kitty-terminal-mcp && npm install
@@ -119,3 +117,32 @@ export CONTEXT7_API_KEY="..."
 ```
 
 Kitty requires remote control enabled. See [mcps/kitty-terminal-mcp/README.md](mcps/kitty-terminal-mcp/README.md).
+
+## GitLab MCP (Node.js Native)
+
+The GitLab MCP is now implemented as a pure Node.js MCP server with a native HTTP client. No external Go service, Docker, or wrappers.
+
+**Architecture**: Node.js MCP Server → Native GitLab API Client → GitLab REST API
+
+**Files**:
+- `mcps/gitlab-mr-service-mcp-node/server.mjs` — MCP server entry point
+- `mcps/gitlab-mr-service-mcp-node/src/gitlab-client.js` — Native GitLab HTTP client
+- `mcps/gitlab-mr-service-mcp-node/src/handlers.js` — MCP tool argument handlers
+
+**10 MCP Tools**:
+1. `mr_list` — List merge requests
+2. `mr_get` — Get MR details
+3. `mr_create` — Create MR
+4. `mr_update_description` — Update MR description
+5. `mr_add_note` — Add MR comment
+6. `mr_get_diffs` — Get MR diff
+7. `mr_get_jobs` — Get MR CI jobs
+8. `pipeline_get_jobs` — Get pipeline jobs
+9. `mr_get_discussions` — Get MR discussions
+10. `mr_get_participants` — Get MR participants
+
+**Run directly**:
+```bash
+export GITLAB_TOKEN="glpat-..."
+node mcps/gitlab-mr-service-mcp-node/server.mjs
+```

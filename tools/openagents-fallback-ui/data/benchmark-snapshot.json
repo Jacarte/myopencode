@@ -1,0 +1,298 @@
+{
+  "generated_at": "2026-03-19T17:58:46.653Z",
+  "script_version": "2026-03-19.1",
+  "quality": "low",
+  "source_status": {
+    "artificial_analysis": {
+      "ok": false,
+      "error": "ARTIFICIAL_ANALYSIS_API_KEY not set"
+    },
+    "openrouter": {
+      "ok": true,
+      "error": null
+    }
+  },
+  "tracked_models": [
+    "openai/gpt-5.4",
+    "openai/gpt-5.3-codex",
+    "openai/gpt-5.2",
+    "anthropic/claude-opus-4-6",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5",
+    "google/gemini-3.1-pro",
+    "google/gemini-3-flash",
+    "github-copilot/grok-code-fast-1",
+    "minimax/minimax-m2.5",
+    "opencode-go/glm-5",
+    "kimi/k2p5"
+  ],
+  "model_signals": {
+    "openai/gpt-5.4": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 0.19999999999999998,
+      "price_per_m_output_usd": 1.25,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "openai/gpt-5.3-codex": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 1.75,
+      "price_per_m_output_usd": 14,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "openai/gpt-5.2": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 1.75,
+      "price_per_m_output_usd": 14,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "anthropic/claude-opus-4-6": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 5,
+      "price_per_m_output_usd": 25,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "anthropic/claude-sonnet-4-6": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 3,
+      "price_per_m_output_usd": 15,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "anthropic/claude-haiku-4-5": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 1,
+      "price_per_m_output_usd": 5,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "google/gemini-3.1-pro": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 2,
+      "price_per_m_output_usd": 12,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "google/gemini-3-flash": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 0.5,
+      "price_per_m_output_usd": 3,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "github-copilot/grok-code-fast-1": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 0.19999999999999998,
+      "price_per_m_output_usd": 1.5,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "minimax/minimax-m2.5": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 0,
+      "price_per_m_output_usd": 0,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "opencode-go/glm-5": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 0.96,
+      "price_per_m_output_usd": 3.1999999999999997,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    },
+    "kimi/k2p5": {
+      "coding_index": null,
+      "intelligence_index": null,
+      "output_tokens_per_second": null,
+      "time_to_first_token_seconds": null,
+      "price_per_m_input_usd": 0.44999999999999996,
+      "price_per_m_output_usd": 2.2,
+      "source": {
+        "artificial_analysis": false,
+        "openrouter": true
+      }
+    }
+  },
+  "recommendations": {
+    "categories": {
+      "visual-engineering": {
+        "summary": "Prefer strong visual/multimodal models for frontend and design-heavy work.",
+        "recommended_models": [
+          "google/gemini-3.1-pro",
+          "openai/gpt-5.4"
+        ],
+        "confidence": "medium"
+      },
+      "ultrabrain": {
+        "summary": "Reserve highest reasoning models for architecture and hard tradeoffs.",
+        "recommended_models": [
+          "openai/gpt-5.4",
+          "anthropic/claude-opus-4-6"
+        ],
+        "confidence": "high"
+      },
+      "deep": {
+        "summary": "Autonomous implementation/debugging usually performs best on code-tuned models.",
+        "recommended_models": [
+          "openai/gpt-5.3-codex",
+          "anthropic/claude-opus-4-6"
+        ],
+        "confidence": "high"
+      },
+      "artistry": {
+        "summary": "Creative tasks benefit from high-variance strong-generative models.",
+        "recommended_models": [
+          "google/gemini-3.1-pro",
+          "anthropic/claude-opus-4-6"
+        ],
+        "confidence": "medium"
+      },
+      "quick": {
+        "summary": "Use fast, cheap models for low-risk short tasks.",
+        "recommended_models": [
+          "anthropic/claude-haiku-4-5",
+          "openai/gpt-5.2"
+        ],
+        "confidence": "medium"
+      },
+      "unspecified-low": {
+        "summary": "Balanced quality/cost default for general low-effort work.",
+        "recommended_models": [
+          "anthropic/claude-sonnet-4-6",
+          "google/gemini-3-flash"
+        ],
+        "confidence": "medium"
+      },
+      "unspecified-high": {
+        "summary": "General hard tasks should use robust frontier models.",
+        "recommended_models": [
+          "anthropic/claude-opus-4-6",
+          "openai/gpt-5.4"
+        ],
+        "confidence": "high"
+      },
+      "writing": {
+        "summary": "Technical writing can prioritize fast high-coherence models.",
+        "recommended_models": [
+          "google/gemini-3-flash",
+          "anthropic/claude-sonnet-4-6"
+        ],
+        "confidence": "medium"
+      },
+      "git": {
+        "summary": "Git operations should optimize for safety + speed, not max reasoning.",
+        "recommended_models": [
+          "openai/gpt-5.2",
+          "anthropic/claude-haiku-4-5"
+        ],
+        "confidence": "medium"
+      }
+    },
+    "agents": {
+      "sisyphus": {
+        "summary": "Main orchestrator prefers high-consistency reasoning and delegation quality.",
+        "recommended_models": [
+          "anthropic/claude-opus-4-6",
+          "openai/gpt-5.4"
+        ],
+        "confidence": "high"
+      },
+      "hephaestus": {
+        "summary": "Deep implementation worker should prioritize coding-focused models.",
+        "recommended_models": [
+          "openai/gpt-5.3-codex",
+          "openai/gpt-5.4"
+        ],
+        "confidence": "high"
+      },
+      "oracle": {
+        "summary": "Read-only architecture consultation benefits from strongest reasoning.",
+        "recommended_models": [
+          "openai/gpt-5.4",
+          "anthropic/claude-opus-4-6"
+        ],
+        "confidence": "high"
+      },
+      "librarian": {
+        "summary": "Documentation/OSS search favors throughput and low cost.",
+        "recommended_models": [
+          "google/gemini-3-flash",
+          "anthropic/claude-haiku-4-5"
+        ],
+        "confidence": "medium"
+      },
+      "explore": {
+        "summary": "Contextual grep/search workflows prioritize speed and broad availability.",
+        "recommended_models": [
+          "github-copilot/grok-code-fast-1",
+          "anthropic/claude-haiku-4-5"
+        ],
+        "confidence": "medium"
+      }
+    }
+  },
+  "notes": [
+    "Use this snapshot as routing guidance, then validate with your own eval set.",
+    "Artificial Analysis metrics require API key; OpenRouter data fills pricing metadata when available."
+  ],
+  "previous_generated_at": "2026-03-19T17:08:25.631Z"
+}
