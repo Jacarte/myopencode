@@ -97,7 +97,7 @@
     }
   },
   "plugin": [
-    "oh-my-opencode@3.11.2",
+    "oh-my-opencode@3.13.1",
     "./plugins/mem0-functional.ts"
   ]
 }

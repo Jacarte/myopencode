@@ -2,42 +2,42 @@
   "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
   "agents": {
     "sisyphus": {
-      "model": "anthropic/claude-opus-4-6",
+      "model": "openai/gpt-5.4",
       "fallback_models": [
-        "openai/gpt-5.4",
+        "github-copilot/gpt-5.4",
         "azure/gpt-5.4-pro"
       ]
     },
     "hephaestus": {
-      "model": "openai/gpt-5.3-codex",
+      "model": "openai/gpt-5.4",
       "fallback_models": [
-        "openai/gpt-5.4",
+        "github-copilot/gpt-5.4",
         "azure/gpt-5.3-codex"
       ]
     },
     "oracle": {
-      "model": "anthropic/claude-opus-4-6",
+      "model": "openai/gpt-5.4",
       "fallback_models": [
         "openai/gpt-5.4",
         "github-copilot/gpt-5.4"
       ]
     },
     "librarian": {
-      "model": "github-copilot/gemini-3-flash-preview",
+      "model": "openai/gpt-5.4",
       "fallback_models": [
-        "anthropic/claude-haiku-4-5",
+        "github-copilot/gpt-5.4",
         "azure/claude-haiku-4-5"
       ]
     },
     "explore": {
-      "model": "github-copilot/grok-code-fast-1",
+      "model": "openai/gpt-5.3-codex-mini",
       "fallback_models": [
-        "anthropic/claude-haiku-4-5",
-        "openai/gpt-5.1-codex-mini"
+        "github-copilot/claude-haiku-4.5",
+        "github-copilot/gpt-5.4-mini"
       ]
     },
     "multimodal-looker": {
-      "model": "github-copilot/gemini-3-flash-preview",
+      "model": "github-copilot/claude-haiku-4.5",
       "fallback_models": [
         "github-copilot/gpt-5.1"
       ]
@@ -48,7 +48,7 @@
       "fallback_models": []
     },
     "metis": {
-      "model": "anthropic/claude-sonnet-4-6",
+      "model": "github-copilot/claude-sonnet-4.6",
       "fallback_models": [
         "openai/gpt-5.4",
         "azure/claude-sonnet-4-5"
@@ -57,7 +57,8 @@
     "momus": {
       "model": "anthropic/claude-opus-4-6",
       "fallback_models": [
-        "openai/gpt-5.3-codex",
+        "openai/gpt-5.4",
+        "github-copilot/gpt-5.4",
         "azure/claude-opus-4-6"
       ]
     },
@@ -65,15 +66,14 @@
       "model": "github-copilot/claude-sonnet-4.6",
       "fallback_models": [
         "openai/gpt-5.3-codex",
-        "github-copilot/gpt-5.1"
+        "github-copilot/gpt-5.4"
       ]
     },
     "sisyphus-junior": {
       "model": "anthropic/claude-opus-4-6",
       "fallback_models": [
-        "openai/gpt-5.3-codex",
-        "github-copilot/claude-haiku-4.5",
-        "github-copilot/gpt-5.1"
+        "openai/gpt-5.4",
+        "github-copilot/gpt-5.4"
       ]
     }
   },
@@ -81,16 +81,16 @@
     "quick": {
       "model": "anthropic/claude-haiku-4-5",
       "fallback_models": [
-        "openai/gpt-5.2",
-        "github-copilot/gpt-5.2",
+        "openai/gpt-5.4-mini",
+        "github-copilot/gpt-5.2-codex-mini",
         "azure/gpt-5.2"
       ]
     },
     "unspecified-low": {
       "model": "anthropic/claude-sonnet-4-6",
       "fallback_models": [
-        "github-copilot/gemini-3-flash-preview",
-        "openai/gpt-5.2"
+        "github-copilot/gpt-5.4-mini",
+        "openai/gpt-5.2-mini"
       ]
     },
     "unspecified-high": {
@@ -104,7 +104,7 @@
     "writing": {
       "model": "anthropic/claude-sonnet-4-6",
       "fallback_models": [
-        "github-copilot/gemini-3-flash-preview",
+        "github-copilot/gpt-5.4",
         "openai/gpt-5.4"
       ]
     },
@@ -112,15 +112,15 @@
       "model": "openai/gpt-5.4",
       "variant": "high",
       "fallback_models": [
-        "github-copilot/gemini-3.1-pro-preview"
+        "github-copilot/gpt-5.4"
       ]
     },
     "git": {
-      "model": "openai/gpt-5.2",
+      "model": "openai/gpt-5.1-mini",
       "description": "All git operations",
       "prompt_append": "Focus on atomic commits, clear messages, and safe operations.",
       "fallback_models": [
-        "anthropic/claude-haiku-4-5"
+        "github-copilot/gpt-5.4-mini"
       ]
     }
   },
@@ -140,10 +140,12 @@
       "github-copilot/gpt-5-mini": 20
     }
   },
+  "model_fallback": true,
   "runtime_fallback": {
     "enabled": true,
     "retry_on_errors": [
       400,
+      402,
       429,
       503,
       529

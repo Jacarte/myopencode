@@ -15,14 +15,15 @@ Personal [OpenCode](https://opencode.ai) configuration. Custom MCP servers, agen
 ├── mcps/
 │   ├── gitlab-mr-service-mcp-node/ # GitLab MR operations (Node.js native, no wrapper)
 │   └── kitty-terminal-mcp/         # Kitty terminal read access (Node)
-├── skills/                     # 7 agent skills
+├── skills/                     # 8 agent skills
 │   ├── go-reviewer/            # Go code review against team conventions
 │   ├── typescript-reviewer/    # TypeScript code review against team conventions
 │   ├── remote-mr-review/       # GitLab MR review workflow
 │   ├── visual-explainer/       # HTML visual explanations and diagrams
 │   ├── javier-writing-style/   # Technical blog post writing style
 │   ├── repo-evals-builder/     # AI eval suite generation from repo behavior
-│   └── skill-creator/          # Guide for authoring new skills
+│   ├── skill-creator/          # Guide for authoring new skills
+│   └── sonarqube-rules/        # SonarQube-aligned coding and review guardrails
 ├── agent/                      # Custom agent definitions (.gitignored)
 ├── commands/                   # Custom slash commands
 └── package.json                # Plugin dependency: @opencode-ai/plugin
