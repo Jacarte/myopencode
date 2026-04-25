@@ -1,6 +1,6 @@
 ---
 name: typescript-reviewer
-description: "Review TypeScript code against Chatlayer team conventions and TypeScript best practices. Use when: (1) reviewing TypeScript code changes, (2) checking TS PRs/MRs, (3) validating TS patterns, (4) ensuring Node.js/Fastify idioms, (5) reviewing shared package dependency update/testing workflow in TS repos. Triggers: 'review typescript', 'ts code review', 'check ts code', 'typescript patterns', 'review *.ts', 'node code'."
+description: "Review TypeScript code againstteam conventions and TypeScript best practices. Use when: (1) reviewing TypeScript code changes, (2) checking TS PRs/MRs, (3) validating TS patterns, (4) ensuring Node.js/Fastify idioms, (5) reviewing shared package dependency update/testing workflow in TS repos, (6) verifying third-party dependency usage and current best-practice patterns with Context7. Triggers: 'review typescript', 'ts code review', 'check ts code', 'typescript patterns', 'review *.ts', 'node code'."
 compatibility: opencode
 ---
 
@@ -129,6 +129,12 @@ log.info("Processing message for bot " + botId);
 - [ ] Do not recommend `file:` dependencies, local package path pointing, or ad-hoc local linking as the default review/testing path
 - [ ] Flag dependency test setups that cannot be reproduced by reviewers or CI from the PR flow
 
+### 8. External Dependency Verification
+
+- [ ] Always use Context7 to verify third-party dependency usage before approving API patterns, examples, or migration guidance
+- [ ] Use Context7 to verify current best-practice or state-of-the-art code patterns when review guidance depends on external libraries or ecosystem conventions
+- [ ] Do not rely only on model memory for external dependency APIs or modern framework guidance when Context7 can verify it
+
 ## Anti-Patterns to Flag
 
 ### Critical (Block MR)
@@ -205,7 +211,7 @@ fetchData().then(data => { ... });
 **Why**: Brief explanation of the improvement.
 ```
 
-Categories: `Type Safety`, `Error Handling`, `Logging`, `Performance`, `Testing`, `Style`, `Security`, `Dependency Workflow`
+Categories: `Type Safety`, `Error Handling`, `Logging`, `Performance`, `Testing`, `Style`, `Security`, `Dependency Workflow`, `Dependency Verification`
 
 ## Reference Files
 
