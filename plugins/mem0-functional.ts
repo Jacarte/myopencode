@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { Part } from "@opencode-ai/sdk";
 import { tool, type Plugin } from "@opencode-ai/plugin";
 
@@ -7,6 +9,10 @@ const MEM0_COMPACTION_MODE = process.env.MEM0_COMPACTION_MODE === "replace" ? "r
 const MEM0_SAVE_COLD_COMPACTION = process.env.MEM0_SAVE_COLD_COMPACTION === "1";
 const MEM0_LOG_INJECTION = process.env.MEM0_LOG_INJECTION === "1";
 const MEM0_LOG_INJECTION_CONTENT = process.env.MEM0_LOG_INJECTION_CONTENT === "1";
+const MEM0_DEBUG_PROMPTS = process.env.MEM0_DEBUG_PROMPTS === "1";
+const MEM0_DEBUG_PROMPT_CONTENT = process.env.MEM0_DEBUG_PROMPT_CONTENT === "1";
+const MEM0_DEBUG_LOG_PATH = process.env.MEM0_DEBUG_LOG_PATH || "/tmp/opencode-mem0.ndjson";
+const MEM0_DEBUG_MAX_CHARS = Number(process.env.MEM0_DEBUG_MAX_CHARS || 4000);
 const MEM0_COLD_MAX_CHARS = Number(process.env.MEM0_COLD_MAX_CHARS || 6000);
 const MEM0_API_MAX_ATTEMPTS = 3;
 const MEM0_API_RETRY_DELAY_MS = 250;
@@ -86,6 +92,50 @@ function clampText(text: string, maxChars: number): string {
 
 function preview(text: string, maxChars = 220): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}...`;
+}
+
+function shouldWriteDebugFile(): boolean {
+  return MEM0_LOG_INJECTION || MEM0_DEBUG_PROMPTS;
+}
+
+function sanitizeDebugText(text: string, maxChars = MEM0_DEBUG_MAX_CHARS): string {
+  return clampText(stripPrivateContent(text), maxChars);
+}
+
+function summarizePart(part: Part): JsonRecord {
+  const partInfo = asRecord(part as unknown);
+  const synthetic = partInfo?.synthetic === true;
+
+  if (part.type === "text" && typeof part.text === "string") {
+    return {
+      id: part.id,
+      type: part.type,
+      synthetic,
+      hasMem0Context: part.text.includes("[MEM0 CONTEXT]"),
+      text: MEM0_DEBUG_PROMPT_CONTENT ? sanitizeDebugText(part.text) : undefined,
+    };
+  }
+
+  return {
+    id: part.id,
+    type: part.type,
+    synthetic,
+  };
+}
+
+function summarizeMessages(messages: Array<{ info: unknown; parts: Part[] }>): JsonRecord[] {
+  return messages.map((message) => {
+    const info = asRecord(message.info);
+    const combinedText = textFromParts(message.parts);
+    return {
+      sessionID: typeof info?.sessionID === "string" ? info.sessionID : undefined,
+      messageID: typeof info?.id === "string" ? info.id : undefined,
+      role: typeof info?.role === "string" ? info.role : undefined,
+      partCount: message.parts.length,
+      hasMem0Context: combinedText.includes("[MEM0 CONTEXT]"),
+      parts: message.parts.map(summarizePart),
+    };
+  });
 }
 
 function parseTimestamp(value: unknown): number | undefined {
@@ -485,23 +535,62 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
     return sessionDirectory.get(sessionID) || ctx.directory;
   }
 
-  async function logInjection(message: string, extra?: JsonRecord): Promise<void> {
+  async function appendDebugEvent(event: string, payload: JsonRecord): Promise<void> {
+    if (!shouldWriteDebugFile()) return;
+
+    try {
+      await mkdir(dirname(MEM0_DEBUG_LOG_PATH), { recursive: true });
+      await appendFile(
+        MEM0_DEBUG_LOG_PATH,
+        `${JSON.stringify({
+          ts: new Date().toISOString(),
+          event,
+          ...payload,
+        })}\n`,
+        "utf8"
+      );
+    } catch (error) {
+      console.warn(
+        "[mem0-functional-plugin] failed to write debug event",
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
+
+  async function logInjection(message: string, extra?: JsonRecord, directory = ctx.directory): Promise<void> {
     if (!MEM0_LOG_INJECTION) return;
+
+    await appendDebugEvent("mem0.injection", {
+      directory,
+      service: "mem0-functional-plugin",
+      level: "info",
+      message,
+      extra: {
+        ...extra,
+        metrics,
+        breakerOpenCount: mem0BreakerOpenCount,
+      },
+    });
+
     try {
       await ctx.client.app.log({
         body: {
           service: "mem0-functional-plugin",
-            level: "info",
-            message,
-            extra: {
-              ...extra,
-              metrics,
-              breakerOpenCount: mem0BreakerOpenCount,
-            },
+          level: "info",
+          message,
+          extra: {
+            ...extra,
+            metrics,
+            breakerOpenCount: mem0BreakerOpenCount,
           },
-          query: { directory: ctx.directory },
+        },
+        query: { directory },
       });
-    } catch {
+    } catch (error) {
+      console.warn(
+        "[mem0-functional-plugin] failed to write app log",
+        error instanceof Error ? error.message : String(error)
+      );
       return;
     }
   }
@@ -650,7 +739,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         sessionID,
         summaryChars: boundedSummary.length,
         coldContext: true,
-      });
+      }, directoryHint || ctx.directory);
     } catch {
       return;
     }
@@ -688,7 +777,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           messageID: output.message.id,
           partID: nudgePart.id,
           text: MEM0_LOG_INJECTION_CONTENT ? preview(MEMORY_NUDGE) : undefined,
-        });
+        }, activeDirectory);
       }
 
       const signature = topicSignature(userMessage);
@@ -731,7 +820,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
           selected: selected.length,
           text: MEM0_LOG_INJECTION_CONTENT ? preview(contextPart.text) : undefined,
-        });
+        }, activeDirectory);
       } catch (error) {
         if (state.lastGoodContextSnippet) {
           const fallbackPart: Part = {
@@ -748,7 +837,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
             messageID: output.message.id,
             partID: fallbackPart.id,
             error: error instanceof Error ? error.message : String(error),
-          });
+          }, activeDirectory);
         }
         // WHY: Memory retrieval must degrade gracefully; chat flow should never fail
         // just because the memory server is unavailable.
@@ -789,7 +878,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           const ids = scopeIdentifiers(scope, toolContext.directory, undefined);
 
           try {
-        if (mode === "help") {
+            if (mode === "help") {
               return JSON.stringify({
                 success: true,
                 modes: ["add", "search", "list", "forget", "help"],
@@ -905,6 +994,58 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           }
         },
       }),
+    },
+
+    "chat.params": async (input, output) => {
+      if (!MEM0_DEBUG_PROMPTS) return;
+
+      const providerInfo = asRecord(input.provider.info as unknown);
+      const modelInfo = asRecord(input.model as unknown);
+      const messageInfo = asRecord(input.message as unknown);
+
+      await appendDebugEvent("provider.params", {
+        sessionID: input.sessionID,
+        agent: input.agent,
+        providerSource: input.provider.source,
+        providerID: typeof providerInfo?.id === "string" ? providerInfo.id : undefined,
+        modelID: typeof modelInfo?.id === "string" ? modelInfo.id : undefined,
+        messageID: typeof messageInfo?.id === "string" ? messageInfo.id : undefined,
+        temperature: output.temperature,
+        topP: output.topP,
+        topK: output.topK,
+        optionKeys: Object.keys(output.options || {}),
+      });
+    },
+
+    "experimental.chat.messages.transform": async (_input, output) => {
+      if (!MEM0_DEBUG_PROMPTS) return;
+
+      const messages = summarizeMessages(output.messages);
+      const lastMessage = messages[messages.length - 1];
+      const markerMatches = messages.filter((message) => message.hasMem0Context === true).length;
+
+      await appendDebugEvent("provider.messages", {
+        sessionID: typeof lastMessage?.sessionID === "string" ? lastMessage.sessionID : undefined,
+        messageCount: messages.length,
+        markerMatches,
+        hasMem0Context: markerMatches > 0,
+        messages,
+      });
+    },
+
+    "experimental.chat.system.transform": async (input, output) => {
+      if (!MEM0_DEBUG_PROMPTS) return;
+
+      const systemText = output.system.join("\n\n");
+      const modelInfo = asRecord(input.model as unknown);
+
+      await appendDebugEvent("provider.system", {
+        sessionID: input.sessionID,
+        modelID: typeof modelInfo?.id === "string" ? modelInfo.id : undefined,
+        systemCount: output.system.length,
+        hasMem0Context: systemText.includes("[MEM0 CONTEXT]"),
+        system: MEM0_DEBUG_PROMPT_CONTENT ? sanitizeDebugText(systemText) : undefined,
+      });
     },
 
     "experimental.session.compacting": async (_input, output) => {

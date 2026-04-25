@@ -1,6 +1,6 @@
 ---
 name: typescript-reviewer
-description: "Review TypeScript code against Chatlayer team conventions and TypeScript best practices. Use when: (1) reviewing TypeScript code changes, (2) checking TS PRs/MRs, (3) validating TS patterns, (4) ensuring Node.js/Fastify idioms. Triggers: 'review typescript', 'ts code review', 'check ts code', 'typescript patterns', 'review *.ts'."
+description: "Review TypeScript code against Chatlayer team conventions and TypeScript best practices. Use when: (1) reviewing TypeScript code changes, (2) checking TS PRs/MRs, (3) validating TS patterns, (4) ensuring Node.js/Fastify idioms, (5) reviewing shared package dependency update/testing workflow in TS repos. Triggers: 'review typescript', 'ts code review', 'check ts code', 'typescript patterns', 'review *.ts', 'node code'."
 compatibility: opencode
 ---
 
@@ -123,6 +123,12 @@ log.info("Processing message for bot " + botId);
 - [ ] Mocking: `vi.fn()`, `vi.mock()`, `vi.spyOn()`
 - [ ] HTTP mocking: `nock` with `nock.cleanAll()` cleanup
 
+### 7. Shared Package Workflow
+
+- [ ] For shared package changes that need downstream validation, prefer the PR-based package publishing workflow
+- [ ] Do not recommend `file:` dependencies, local package path pointing, or ad-hoc local linking as the default review/testing path
+- [ ] Flag dependency test setups that cannot be reproduced by reviewers or CI from the PR flow
+
 ## Anti-Patterns to Flag
 
 ### Critical (Block MR)
@@ -155,6 +161,14 @@ console.log('Debug:', data);
 
 // BAD: Magic strings
 if (status === 'AUTHENTICATION') {  // Use ErrorCode enum
+}
+
+// BAD: Local package path pointing for shared package validation
+"dependencies": {
+  "@chatlayer/shared": "file:../shared"
+}
+
+// PREFER: Validate shared package changes through the package PR publishing flow
 ```
 
 ### Medium Priority
@@ -191,7 +205,7 @@ fetchData().then(data => { ... });
 **Why**: Brief explanation of the improvement.
 ```
 
-Categories: `Type Safety`, `Error Handling`, `Logging`, `Performance`, `Testing`, `Style`, `Security`
+Categories: `Type Safety`, `Error Handling`, `Logging`, `Performance`, `Testing`, `Style`, `Security`, `Dependency Workflow`
 
 ## Reference Files
 
