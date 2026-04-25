@@ -1,12 +1,12 @@
-# TypeScript Testing Conventions - Chatlayer
+# TypeScript Testing Conventions
 
-Complete reference for testing patterns in Chatlayer TypeScript services.
+Complete reference for testing patterns in TypeScript services and packages.
 
 ## 1. Testing Frameworks
 
 ### Vitest (Primary - Modern Services)
 
-Used in: bot-engine, dialogstates, app-integrations, webchat, storage, channels
+Used in: modern TypeScript services
 
 ```bash
 # Run tests
@@ -21,7 +21,7 @@ NODE_OPTIONS='--max_old_space_size=8192' vitest
 
 ### Jest (Legacy - Older Packages)
 
-Used in: events, app-platform, response-maker, fastify-oidc
+Used in: legacy TypeScript packages
 
 ```bash
 yarn test
@@ -88,7 +88,7 @@ module.exports = {
 ### Directory Structure
 
 ```
-services/bot-engine/src/
+services/example-service/src/
 ├── channels/
 │   └── common/
 │       ├── transformers.ts
@@ -239,14 +239,14 @@ expect(mockFn).toHaveBeenCalledOnce();
 
 ```typescript
 // Must be at top of file, hoisted automatically
-vi.mock("@chatlayer/azure-openai", () => ({
-  createAzureChatOpenAI: vi.fn(),
+vi.mock("@org/ai-client", () => ({
+  createAIClient: vi.fn(),
   isEnvironmentReady: vi.fn(() => true),
 }));
 
 // Access mocked module
-import { createAzureChatOpenAI } from "@chatlayer/azure-openai";
-const mocked = vi.mocked(createAzureChatOpenAI);
+import { createAIClient } from "@org/ai-client";
+const mocked = vi.mocked(createAIClient);
 mocked.mockReturnValue(mockInstance);
 ```
 

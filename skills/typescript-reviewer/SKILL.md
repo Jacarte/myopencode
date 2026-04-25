@@ -1,12 +1,12 @@
 ---
 name: typescript-reviewer
-description: "Review TypeScript code againstteam conventions and TypeScript best practices. Use when: (1) reviewing TypeScript code changes, (2) checking TS PRs/MRs, (3) validating TS patterns, (4) ensuring Node.js/Fastify idioms, (5) reviewing shared package dependency update/testing workflow in TS repos, (6) verifying third-party dependency usage and current best-practice patterns with Context7. Triggers: 'review typescript', 'ts code review', 'check ts code', 'typescript patterns', 'review *.ts', 'node code'."
+description: "Review TypeScript code against strong team conventions and TypeScript best practices. Use when: (1) reviewing TypeScript code changes, (2) checking TS PRs/MRs, (3) validating TS patterns, (4) ensuring Node.js/Fastify idioms, (5) reviewing shared package dependency update/testing workflow in TS repos, (6) verifying third-party dependency usage and current best-practice patterns with Context7. Triggers: 'review typescript', 'ts code review', 'check ts code', 'typescript patterns', 'review *.ts', 'node code'."
 compatibility: opencode
 ---
 
 # TypeScript Code Reviewer
 
-Review TypeScript code against Chatlayer team conventions derived from actual codebase patterns in bot-engine, dialogstates, and shared packages.
+Review TypeScript code against strong TypeScript service conventions derived from common backend and shared package patterns.
 
 ## Quick Review Checklist
 
@@ -25,8 +25,8 @@ Review TypeScript code against Chatlayer team conventions derived from actual co
 // CORRECT: Grouped with relative paths
 import { FastifyInstance } from "fastify";
 
-import { Chatlayer } from "@chatlayer/core";
-import { log } from "@chatlayer/logger";
+import { AppClient } from "@org/core";
+import { log } from "@org/logger";
 
 import { config } from "../config";
 import { createApp } from "./app";
@@ -34,7 +34,7 @@ import { createApp } from "./app";
 // INCORRECT: Mixed grouping, unordered
 import { config } from "../config";
 import { FastifyInstance } from "fastify";
-import { log } from "@chatlayer/logger";
+import { log } from "@org/logger";
 ```
 
 ### Error Handling
@@ -94,7 +94,7 @@ log.info("Processing message for bot " + botId);
 
 ### 3. Logging & Observability
 
-- [ ] Using `@chatlayer/logger` (Pino-based)
+- [ ] Using a structured logger abstraction (for example, a Pino-based logger wrapper)
 - [ ] Named loggers: `logManager.getLogger('root.module')`
 - [ ] Structured logging: `log.info({ data }, 'message')`
 - [ ] Redaction paths for sensitive data (Authorization, API keys)
@@ -171,7 +171,7 @@ if (status === 'AUTHENTICATION') {  // Use ErrorCode enum
 
 // BAD: Local package path pointing for shared package validation
 "dependencies": {
-  "@chatlayer/shared": "file:../shared"
+  "@org/shared": "file:../shared"
 }
 
 // PREFER: Validate shared package changes through the package PR publishing flow

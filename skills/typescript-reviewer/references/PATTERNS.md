@@ -1,13 +1,13 @@
-# TypeScript Code Patterns - Chatlayer
+# TypeScript Code Patterns
 
-Complete reference of TypeScript patterns used in Chatlayer services.
+Complete reference of TypeScript patterns used in backend services and shared packages.
 
 ## 1. Project Structure
 
-### Service Layout (bot-engine, dialogstates)
+### Service Layout (example backend service)
 
 ```
-services/bot-engine/
+services/example-service/
 ├── src/
 │   ├── __generated__/          # GraphQL generated types
 │   ├── __tests__/              # Test files
@@ -34,12 +34,12 @@ services/bot-engine/
 └── package.json
 ```
 
-### Package Layout (core, logger)
+### Package Layout (shared packages)
 
 ```
 packages/core/
 ├── src/
-│   ├── chatlayer/              # Main exports
+│   ├── client/                 # Main exports
 │   ├── models/                 # Data models
 │   ├── util/                   # Utilities
 │   └── index.ts                # Barrel export
@@ -136,7 +136,7 @@ export class ApplicationError extends Error {
 import { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { StatusCodes } from "http-status-codes";
 import { ApplicationError, ErrorCode } from "../core/errors";
-import logger from "@chatlayer/logger";
+import logger from "@org/logger";
 
 export const errorHandler = async (
   error: FastifyError,
@@ -216,7 +216,7 @@ try {
 
 ```typescript
 // src/logManager.ts
-import logger, { logManager } from "@chatlayer/logger";
+import logger, { logManager } from "@org/logger";
 
 const REDACTION_PATHS = [
   "outcome.error.cause.config.headers.Authorization",
@@ -254,13 +254,13 @@ childLog.info("message"); // Output: [bot:8] message
 
 ```typescript
 // src/tracing.ts
-import tracer from "@chatlayer/tracer";
+import tracer from "@org/tracer";
 import config from "./config";
 
 tracer.init({
   env: config.ENVIRONMENT,
   version: process.env.RELEASE_TAG,
-  service: "chatlayer-bot-engine",
+  service: "example-service",
   startupLogs: true,
   logInjection: true,
   logLevel: "error",
@@ -484,10 +484,10 @@ import { FastifyInstance } from "fastify";
 import Joi from "@hapi/joi";
 import * as Sentry from "@sentry/node";
 
-// 3. Internal packages (@chatlayer/*)
-import { Chatlayer } from "@chatlayer/core";
-import logger from "@chatlayer/logger";
-import tracer from "@chatlayer/tracer";
+// 3. Internal packages (@org/*)
+import { AppClient } from "@org/core";
+import logger from "@org/logger";
+import tracer from "@org/tracer";
 
 // 4. Local imports (relative paths)
 import config from "./config";
