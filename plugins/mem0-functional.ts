@@ -5,6 +5,7 @@ import type { Part } from "@opencode-ai/sdk";
 import { tool, type Plugin } from "@opencode-ai/plugin";
 
 const MEM0_SERVER_URL = (process.env.MEM0_SERVER_URL || "http://192.168.0.160:18000").replace(/\/+$/, "");
+const MEM0_BACKEND_MODE = resolveMem0BackendMode(process.env.MEM0_BACKEND_MODE);
 const MEM0_COMPACTION_MODE = process.env.MEM0_COMPACTION_MODE === "replace" ? "replace" : "append";
 const MEM0_SAVE_COLD_COMPACTION = process.env.MEM0_SAVE_COLD_COMPACTION === "1";
 const MEM0_LOG_INJECTION = process.env.MEM0_LOG_INJECTION === "1";
@@ -30,12 +31,59 @@ const MAX_CONTEXT_ITEMS = 6;
 
 type Scope = "user" | "project" | "agent" | "environment";
 type MemoryType = "decision" | "problem-fix" | "stable-fact" | "procedure" | "noise";
+type Mem0BackendMode = "legacy" | "backend";
+type Mem0AnchorType = "file" | "commit" | "pr" | "issue";
+type Mem0AnchorProvenanceMode = "verified" | "derived";
 type JsonRecord = Record<string, unknown>;
+
+interface Mem0AnchorProvenance {
+  mode: Mem0AnchorProvenanceMode;
+  source: string;
+  commit_pinned: boolean;
+}
+
+interface Mem0Anchor {
+  type: Mem0AnchorType;
+  repo: string;
+  locator: string;
+  ref?: string;
+  commit_sha?: string;
+  url?: string;
+  title?: string;
+  created_at: string;
+  observed_at?: string;
+  is_stale: boolean;
+  provenance: Mem0AnchorProvenance;
+}
+
+interface Mem0AnchorContext {
+  type?: Mem0AnchorType;
+  repo?: string;
+  locator?: string;
+  path?: string;
+  file_path?: string;
+  ref?: string;
+  commit_sha?: string;
+  url?: string;
+  title?: string;
+  created_at?: string;
+  observed_at?: string;
+  is_stale?: boolean;
+  pr_number?: string;
+  issue_number?: string;
+}
+
+interface Mem0ScopeIdentifiers {
+  user_id: string;
+  agent_id: string;
+  run_id?: string;
+}
 
 interface MemoryResult {
   id: string;
   content: string;
   score?: number;
+  anchor?: JsonRecord | null;
   metadata?: JsonRecord;
 }
 
@@ -68,8 +116,160 @@ interface PluginMetrics {
   breakerOpens: number;
 }
 
+interface Mem0BackendClientDependencies {
+  mode: Mem0BackendMode;
+  parseResults: (payload: unknown) => MemoryResult[];
+  request: (path: string, init: RequestInit) => Promise<unknown>;
+}
+
+interface Mem0ToolSearchParams {
+  identifiers: Mem0ScopeIdentifiers;
+  limit?: number;
+  query: string;
+  scope: Scope;
+}
+
+interface Mem0ToolSearchResponse {
+  mode: Mem0BackendMode;
+  endpoint: "/search" | "/retrieve";
+  results: MemoryResult[];
+  backendCapabilities?: JsonRecord;
+  degraded?: boolean;
+  degradationReasons?: string[];
+  requestId?: string;
+}
+
+const mem0AnchorTypeSchema = tool.schema.enum(["file", "commit", "pr", "issue"]);
+const mem0AnchorProvenanceSchema = tool.schema.object({
+  mode: tool.schema.enum(["verified", "derived"]),
+  source: tool.schema.string(),
+  commit_pinned: tool.schema.boolean(),
+});
+const mem0AnchorSchema = tool.schema.object({
+  type: mem0AnchorTypeSchema,
+  repo: tool.schema.string(),
+  locator: tool.schema.string(),
+  ref: tool.schema.string().optional(),
+  commit_sha: tool.schema.string().optional(),
+  url: tool.schema.string().optional(),
+  title: tool.schema.string().optional(),
+  created_at: tool.schema.string(),
+  observed_at: tool.schema.string().optional(),
+  is_stale: tool.schema.boolean(),
+  provenance: mem0AnchorProvenanceSchema,
+});
+const mem0AnchorContextSchema = tool.schema.object({
+  type: mem0AnchorTypeSchema.optional(),
+  repo: tool.schema.string().optional(),
+  locator: tool.schema.string().optional(),
+  path: tool.schema.string().optional(),
+  file_path: tool.schema.string().optional(),
+  ref: tool.schema.string().optional(),
+  commit_sha: tool.schema.string().optional(),
+  url: tool.schema.string().optional(),
+  title: tool.schema.string().optional(),
+  created_at: tool.schema.string().optional(),
+  observed_at: tool.schema.string().optional(),
+  is_stale: tool.schema.boolean().optional(),
+  pr_number: tool.schema.string().optional(),
+  issue_number: tool.schema.string().optional(),
+});
+
 function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === "object" ? (value as JsonRecord) : null;
+}
+
+function omitUndefinedDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => omitUndefinedDeep(entry));
+  }
+
+  const record = asRecord(value);
+  if (!record) return value;
+
+  const cleaned: JsonRecord = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (entry === undefined) continue;
+    cleaned[key] = omitUndefinedDeep(entry);
+  }
+  return cleaned;
+}
+
+function normalizeAnchorWriteInput(anchor: Mem0Anchor | undefined): JsonRecord | undefined {
+  if (!anchor) return undefined;
+  return asRecord(omitUndefinedDeep(anchor)) || undefined;
+}
+
+function normalizeAnchorContextWriteInput(anchorContext: Mem0AnchorContext | undefined): JsonRecord | undefined {
+  if (!anchorContext) return undefined;
+  return asRecord(omitUndefinedDeep(anchorContext)) || undefined;
+}
+
+function asStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  return entries.length > 0 ? entries : undefined;
+}
+
+function normalizeLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 10;
+  return Math.max(1, Math.floor(value || 10));
+}
+
+function resolveMem0BackendMode(value: string | undefined): Mem0BackendMode {
+  return value === "backend" ? "backend" : "legacy";
+}
+
+function createMem0BackendClient(dependencies: Mem0BackendClientDependencies) {
+  return {
+    mode: dependencies.mode,
+    async search(params: Mem0ToolSearchParams): Promise<Mem0ToolSearchResponse> {
+      const limit = normalizeLimit(params.limit);
+
+      if (dependencies.mode === "backend") {
+        const payload = await dependencies.request("/retrieve", {
+          method: "POST",
+          body: JSON.stringify({
+            query: params.query,
+            scopes: [params.scope],
+            ...params.identifiers,
+            limit,
+            filters: {
+              include_cold_context: false,
+            },
+          }),
+        });
+
+        const parsed = asRecord(payload);
+        return {
+          mode: dependencies.mode,
+          endpoint: "/retrieve",
+          results: dependencies.parseResults(payload).slice(0, limit),
+          backendCapabilities: asRecord(parsed?.backend_capabilities) || undefined,
+          degraded: parsed?.degraded === true,
+          degradationReasons: asStringList(parsed?.degradation_reasons),
+          requestId: typeof parsed?.request_id === "string" ? parsed.request_id : undefined,
+        };
+      }
+
+      const payload = await dependencies.request("/search", {
+        method: "POST",
+        body: JSON.stringify({
+          query: params.query,
+          ...params.identifiers,
+          filters: { scope: params.scope },
+        }),
+      });
+
+      const parsed = asRecord(payload);
+      return {
+        mode: dependencies.mode,
+        endpoint: "/search",
+        results: dependencies.parseResults(payload).slice(0, limit),
+        backendCapabilities: asRecord(parsed?.backend_capabilities) || undefined,
+      };
+    },
+  };
 }
 
 function textFromParts(parts: unknown): string {
@@ -147,6 +347,86 @@ function parseTimestamp(value: unknown): number | undefined {
     if (Number.isFinite(asDate)) return asDate;
   }
   return undefined;
+}
+
+function hasOwnKey(value: JsonRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function normalizeAnchor(value: unknown): JsonRecord | null | undefined {
+  if (value === null) return null;
+  return asRecord(value) || undefined;
+}
+
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function shortSha(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 8) : undefined;
+}
+
+function shortRef(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed
+    .replace(/^refs\/heads\//, "")
+    .replace(/^refs\/tags\//, "")
+    .replace(/^refs\/pull\//, "pull/");
+}
+
+function extractAnchorNumber(locator: unknown, prefix: string): string | undefined {
+  if (typeof locator !== "string") return undefined;
+  const match = locator.match(new RegExp(`^${prefix}/(\\d+)$`, "i"));
+  return match?.[1];
+}
+
+function formatAnchorLabel(anchor: JsonRecord | null | undefined): string | null {
+  if (!anchor) return null;
+
+  const provenance = asRecord(anchor.provenance);
+  const mode = provenance?.mode === "verified" || provenance?.mode === "derived" ? provenance.mode : "anchor";
+  const source = typeof provenance?.source === "string" && provenance.source !== "observed" ? provenance.source : undefined;
+  const anchorType = typeof anchor.type === "string" ? anchor.type : undefined;
+  const title = typeof anchor.title === "string" ? compactWhitespace(anchor.title) : undefined;
+  const locator = typeof anchor.locator === "string" ? anchor.locator : undefined;
+  const ref = shortRef(anchor.ref);
+  const commit = shortSha(anchor.commit_sha);
+
+  let descriptor: string | null = null;
+
+  if (anchorType === "file") {
+    const fileLabel = title || locator;
+    if (fileLabel) {
+      const extras = [commit ? `@${commit}` : undefined, ref ? `ref ${ref}` : undefined].filter(Boolean);
+      descriptor = `file: ${fileLabel}${extras.length > 0 ? ` ${extras.join(" ")}` : ""}`;
+    }
+  } else if (anchorType === "commit") {
+    const sha = commit || shortSha(locator);
+    if (sha) {
+      descriptor = `commit: ${sha}${title ? ` ${title}` : ""}`;
+    }
+  } else if (anchorType === "pr") {
+    const number = extractAnchorNumber(locator, "pr");
+    if (number) {
+      const extras = [title, commit ? `@${commit}` : undefined].filter(Boolean);
+      descriptor = `PR #${number}${extras.length > 0 ? ` ${extras.join(" ")}` : ""}`;
+    }
+  } else if (anchorType === "issue") {
+    const number = extractAnchorNumber(locator, "issue");
+    if (number) {
+      descriptor = `Issue #${number}${title ? ` ${title}` : ""}`;
+    }
+  }
+
+  if (!descriptor) return null;
+  if (mode === "derived" && source) {
+    return `${mode} ${descriptor} via ${source}`;
+  }
+  return `${mode} ${descriptor}`;
 }
 
 function normalizeText(content: string): string {
@@ -329,11 +609,13 @@ function normalizeResults(payload: unknown): MemoryResult[] {
   return list
     .map((item) => {
       const row = asRecord(item);
+      const metadata = asRecord(row?.metadata) || undefined;
       return {
         id: String(row?.id || row?.memory_id || ""),
         content: String(row?.memory || row?.content || row?.text || row?.summary || row?.chunk || "").trim(),
         score: typeof row?.score === "number" ? row.score : typeof row?.similarity === "number" ? row.similarity : undefined,
-        metadata: asRecord(row?.metadata) || undefined,
+        anchor: row && hasOwnKey(row, "anchor") ? normalizeAnchor(row.anchor) : normalizeAnchor(metadata?.anchor),
+        metadata,
       };
     })
     .filter((item: { id: string; content: string }) => item.id && item.content);
@@ -415,6 +697,69 @@ async function mem0Request(path: string, init: RequestInit): Promise<unknown> {
   throw new Error(
     `mem0 request failed after ${MEM0_API_MAX_ATTEMPTS} attempts (timeout=${lastTimeoutMs}ms): ${lastError?.message || "unknown error"}`
   );
+}
+
+const mem0BackendClient = createMem0BackendClient({
+  mode: MEM0_BACKEND_MODE,
+  parseResults: normalizeResults,
+  request: mem0Request,
+});
+
+function normalizeBackendRetrieveCandidates(payload: unknown, defaultScope: Scope): MemoryCandidate[] {
+  const parsed = asRecord(payload);
+  const results = Array.isArray(parsed?.results) ? parsed.results : [];
+  const candidates: MemoryCandidate[] = [];
+
+  for (const item of results) {
+    const row = asRecord(item);
+    if (!row) continue;
+
+    const metadata = asRecord(row.metadata) || undefined;
+    const anchor = hasOwnKey(row, "anchor") ? normalizeAnchor(row.anchor) : normalizeAnchor(metadata?.anchor);
+    const scope = asScope(row.scope) || asScope(metadata?.scope) || defaultScope;
+    const type = typeof row.type === "string"
+      ? row.type
+      : typeof metadata?.type === "string"
+        ? metadata.type
+        : "unknown";
+    const content = String(row.content || row.memory || row.text || row.summary || row.chunk || "").trim();
+    if (!content) continue;
+
+    const score = typeof row.score === "number"
+      ? row.score
+      : typeof row.similarity === "number"
+        ? row.similarity
+        : undefined;
+    const candidate: MemoryCandidate = {
+      id: String(row.id || row.memory_id || ""),
+      content,
+      score,
+      anchor,
+      metadata,
+      scope,
+      type,
+      fingerprint: typeof metadata?.fingerprint === "string" ? metadata.fingerprint : contentFingerprint(content),
+      createdAt: parseTimestamp(row.created_at || row.createdAt || metadata?.created_at || metadata?.createdAt),
+      ttlExpiresAt: parseTimestamp(row.ttl_expires_at || row.ttlExpiresAt || metadata?.ttl_expires_at || metadata?.ttlExpiresAt),
+      decayHalfLifeDays: typeof row.decay_half_life_days === "number"
+        ? row.decay_half_life_days
+        : typeof row.decayHalfLifeDays === "number"
+          ? row.decayHalfLifeDays
+          : typeof metadata?.decay_half_life_days === "number"
+            ? metadata.decay_half_life_days
+            : typeof metadata?.decayHalfLifeDays === "number"
+              ? metadata.decayHalfLifeDays
+              : undefined,
+      inject: metadata?.inject !== false,
+      semantic: typeof score === "number" ? score : 0.5,
+      rankScore: typeof score === "number" ? score : 0,
+    };
+
+    if (!candidate.id || !candidate.inject || candidate.type === "noise") continue;
+    candidates.push(candidate);
+  }
+
+  return candidates;
 }
 
 async function searchScope(
@@ -631,6 +976,30 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
     return rankCandidates(candidates);
   }
 
+  async function retrieveBackendCandidates(query: string, directory: string, agent?: string): Promise<MemoryCandidate[]> {
+    metrics.retrievalAttempts += 1;
+    const identifiers = scopeIdentifiers("project", directory, agent);
+    const payload = await mem0Request("/retrieve", {
+      method: "POST",
+      body: JSON.stringify({
+        query,
+        scopes: ["user", "project", "agent", "environment"],
+        ...identifiers,
+        limit: MAX_CONTEXT_ITEMS,
+        filters: {
+          include_cold_context: false,
+        },
+      }),
+    });
+
+    const candidates = normalizeBackendRetrieveCandidates(payload, "project");
+    if (candidates.length > 0) {
+      metrics.retrievalHits += 1;
+    }
+
+    return candidates;
+  }
+
   function buildContextText(candidates: MemoryCandidate[]): string {
     const grouped: Record<Scope, MemoryCandidate[]> = {
       user: [],
@@ -652,7 +1021,10 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
       .map(({ scope, title }) => {
         const rows = grouped[scope];
         if (rows.length === 0) return "";
-        const lines = rows.map((row) => `- [${row.type}] ${row.content}`);
+        const lines = rows.map((row) => {
+          const anchorLabel = formatAnchorLabel(row.anchor);
+          return `- [${row.type}] ${row.content}${anchorLabel ? ` [${anchorLabel}]` : ""}`;
+        });
         return `${title}:\n${lines.join("\n")}`;
       })
       .filter(Boolean);
@@ -791,7 +1163,9 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
       if (!shouldRetrieve) return;
 
       try {
-        const ranked = await retrieveRankedCandidates(userMessage, activeDirectory, input.agent);
+        const ranked = MEM0_BACKEND_MODE === "backend"
+          ? await retrieveBackendCandidates(userMessage, activeDirectory, input.agent)
+          : await retrieveRankedCandidates(userMessage, activeDirectory, input.agent);
         const selected = selectForInjection(ranked, state);
         if (selected.length === 0) return;
         const contextText = buildContextText(selected);
@@ -854,6 +1228,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           query: tool.schema.string().optional(),
           scope: tool.schema.enum(["user", "project", "agent", "environment"]).optional(),
           type: tool.schema.enum(["decision", "problem-fix", "stable-fact", "procedure", "noise"]).optional(),
+          anchor: mem0AnchorSchema.optional(),
+          anchorContext: mem0AnchorContextSchema.optional(),
           memoryId: tool.schema.string().optional(),
           limit: tool.schema.number().optional(),
         },
@@ -863,6 +1239,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           query?: string;
           scope?: Scope;
           type?: MemoryType;
+          anchor?: Mem0Anchor;
+          anchorContext?: Mem0AnchorContext;
           memoryId?: string;
           limit?: number;
         }, toolContext) {
@@ -883,7 +1261,9 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                 success: true,
                 modes: ["add", "search", "list", "forget", "help"],
                 scopes: ["user", "project", "agent", "environment"],
-                note: "Only high-signal memories should be stored.",
+                backend_mode: MEM0_BACKEND_MODE,
+                search_endpoint: mem0BackendClient.mode === "backend" ? "/retrieve" : "/search",
+                note: "Only high-signal memories should be stored. Optional add-mode anchoring can be passed via anchor or anchorContext.",
               });
             }
 
@@ -904,36 +1284,48 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
               }
 
               const supersedes = await detectSupersedes(sanitized, quality.type, scope, toolContext.directory);
+              const anchor = normalizeAnchorWriteInput(args.anchor);
+              const anchorContext = normalizeAnchorContextWriteInput(args.anchorContext);
+              const metadata: JsonRecord = {
+                source: "opencode-plugin",
+                scope,
+                type: quality.type,
+                tier: "long-term",
+                project_id: resolveProjectID(toolContext.directory),
+                created_at: new Date().toISOString(),
+                last_used_at: new Date().toISOString(),
+                access_count: 0,
+                fingerprint: contentFingerprint(sanitized),
+                decay_half_life_days: deriveHalfLifeDays(quality.type),
+                inject: true,
+                supersedes,
+              };
+
+              if (anchor) {
+                metadata.anchor = anchor;
+              }
+              if (anchorContext) {
+                metadata.anchor_context = anchorContext;
+              }
 
               const payload = await mem0Request("/memories", {
                 method: "POST",
                 body: JSON.stringify({
                   messages: [{ role: "user", content: sanitized }],
                   ...ids,
-                  metadata: {
-                    source: "opencode-plugin",
-                    scope,
-                    type: quality.type,
-                    tier: "long-term",
-                    project_id: resolveProjectID(toolContext.directory),
-                    created_at: new Date().toISOString(),
-                    last_used_at: new Date().toISOString(),
-                    access_count: 0,
-                    fingerprint: contentFingerprint(sanitized),
-                    decay_half_life_days: deriveHalfLifeDays(quality.type),
-                    inject: true,
-                    supersedes,
-                  },
+                  metadata,
                 }),
               });
 
               const payloadData = asRecord(payload);
+              const createdMemory = asRecord(payloadData?.memory);
               return JSON.stringify({
                 success: true,
                 scope,
                 type: quality.type,
                 reason: quality.reason,
                 id: payloadData?.id,
+                anchor: normalizeAnchor(createdMemory?.anchor) || normalizeAnchor(payloadData?.anchor),
                 identifiers: ids,
                 project_id: resolveProjectID(toolContext.directory),
                 supersedes,
@@ -946,21 +1338,23 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                 return JSON.stringify({ success: false, error: "query is required for search mode" });
               }
 
-              const payload = await mem0Request("/search", {
-                method: "POST",
-                body: JSON.stringify({
-                  query: args.query,
-                  ...ids,
-                  filters: { scope },
-                }),
+              const response = await mem0BackendClient.search({
+                query: args.query,
+                identifiers: ids,
+                limit: args.limit,
+                scope,
               });
-
-              const results = normalizeResults(payload).slice(0, args.limit || 10);
               return JSON.stringify({
                 success: true,
                 scope,
-                count: results.length,
-                results,
+                mode: response.mode,
+                endpoint: response.endpoint,
+                backend_capabilities: response.backendCapabilities,
+                degraded: response.degraded,
+                degradation_reasons: response.degradationReasons,
+                request_id: response.requestId,
+                count: response.results.length,
+                results: response.results,
               });
             }
 

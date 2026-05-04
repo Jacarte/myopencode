@@ -26,6 +26,7 @@ The plugin integrates with OpenCode through four hooks that map to different pha
 
 - `chat.message`: runs on each user message. It detects recall intent or topic shift, retrieves ranked memories from mem0, and injects a bounded `[MEM0 CONTEXT]` block into the prompt parts.
 - `tool` (custom tool `mem0`): provides explicit memory operations (`add`, `search`, `list`, `forget`, `help`) so the assistant can persist and query high-signal memories on demand.
+- `tool` `add` mode can optionally pass backend-owned anchoring data via `anchor` or `anchorContext`, which the mem0 server validates or derives into canonical anchor metadata.
 - `experimental.session.compacting`: runs during session compaction and appends high-signal project memory (or replaces compaction prompt when configured) so durable context survives long sessions.
 - `event`: listens to runtime events such as `message.updated` (to archive finished compaction summaries as cold memory) and `session.deleted` (to clean per-session in-memory state).
 
