@@ -9,7 +9,7 @@ File: `~/.config/opencode/plugins/mem0-functional.ts`
 This plugin is wired to a local reference server implementation at:
 
 - `~/.config/opencode/plugins/mem0server/`
-- Server docs: `~/.config/opencode/plugins/mem0server/README.md`
+- Server docs [here](https://github.com/Jacarte/smallmem0server/blob/main/README.md)
 
 Runtime endpoint contract expected by this plugin:
 

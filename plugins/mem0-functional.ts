@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Part } from "@opencode-ai/sdk";
@@ -6,6 +7,7 @@ import { tool, type Plugin } from "@opencode-ai/plugin";
 
 const MEM0_SERVER_URL = (process.env.MEM0_SERVER_URL || "http://192.168.0.160:18000").replace(/\/+$/, "");
 const MEM0_BACKEND_MODE = resolveMem0BackendMode(process.env.MEM0_BACKEND_MODE);
+const MEM0_AUTO_ANCHOR_CONTEXT = resolveAutoAnchorContextMode(process.env.MEM0_AUTO_ANCHOR_CONTEXT);
 const MEM0_COMPACTION_MODE = process.env.MEM0_COMPACTION_MODE === "replace" ? "replace" : "append";
 const MEM0_SAVE_COLD_COMPACTION = process.env.MEM0_SAVE_COLD_COMPACTION === "1";
 const MEM0_LOG_INJECTION = process.env.MEM0_LOG_INJECTION === "1";
@@ -32,9 +34,18 @@ const MAX_CONTEXT_ITEMS = 6;
 type Scope = "user" | "project" | "agent" | "environment";
 type MemoryType = "decision" | "problem-fix" | "stable-fact" | "procedure" | "noise";
 type Mem0BackendMode = "legacy" | "backend";
+type Mem0AutoAnchorContextMode = "off" | "safe";
 type Mem0AnchorType = "file" | "commit" | "pr" | "issue";
 type Mem0AnchorProvenanceMode = "verified" | "derived";
 type JsonRecord = Record<string, unknown>;
+
+type GitCommandRunner = (directory: string, args: string[]) => string | undefined;
+
+interface InferAnchorContextOptions {
+  enabled?: boolean;
+  env?: NodeJS.ProcessEnv;
+  runGit?: GitCommandRunner;
+}
 
 interface Mem0AnchorProvenance {
   mode: Mem0AnchorProvenanceMode;
@@ -218,6 +229,143 @@ function normalizeLimit(value: number | undefined): number {
 
 function resolveMem0BackendMode(value: string | undefined): Mem0BackendMode {
   return value === "backend" ? "backend" : "legacy";
+}
+
+function resolveAutoAnchorContextMode(value: string | undefined): Mem0AutoAnchorContextMode {
+  return value === "0" || value === "off" ? "off" : "safe";
+}
+
+function inferAnchorContextType(anchorContext: Mem0AnchorContext | undefined): Mem0AnchorContext | undefined {
+  if (!anchorContext) return undefined;
+  if (anchorContext.type) return anchorContext;
+
+  if (anchorContext.locator || anchorContext.path || anchorContext.file_path) {
+    return { ...anchorContext, type: "file" };
+  }
+  if (anchorContext.pr_number) {
+    return { ...anchorContext, type: "pr" };
+  }
+  if (anchorContext.issue_number) {
+    return { ...anchorContext, type: "issue" };
+  }
+  if (anchorContext.commit_sha) {
+    return { ...anchorContext, type: "commit" };
+  }
+
+  return anchorContext;
+}
+
+function mergeAnchorContexts(
+  inferred: Mem0AnchorContext | undefined,
+  explicit: Mem0AnchorContext | undefined
+): Mem0AnchorContext | undefined {
+  const normalizedExplicit = inferAnchorContextType(explicit);
+  if (!inferred) return normalizedExplicit;
+  if (!normalizedExplicit) return inferred;
+
+  const merged: Mem0AnchorContext = {
+    ...inferred,
+    ...(normalizedExplicit.type !== undefined ? { type: normalizedExplicit.type } : {}),
+    ...(normalizedExplicit.repo !== undefined ? { repo: normalizedExplicit.repo } : {}),
+    ...(normalizedExplicit.locator !== undefined ? { locator: normalizedExplicit.locator } : {}),
+    ...(normalizedExplicit.path !== undefined ? { path: normalizedExplicit.path } : {}),
+    ...(normalizedExplicit.file_path !== undefined ? { file_path: normalizedExplicit.file_path } : {}),
+    ...(normalizedExplicit.ref !== undefined ? { ref: normalizedExplicit.ref } : {}),
+    ...(normalizedExplicit.commit_sha !== undefined ? { commit_sha: normalizedExplicit.commit_sha } : {}),
+    ...(normalizedExplicit.url !== undefined ? { url: normalizedExplicit.url } : {}),
+    ...(normalizedExplicit.title !== undefined ? { title: normalizedExplicit.title } : {}),
+    ...(normalizedExplicit.created_at !== undefined ? { created_at: normalizedExplicit.created_at } : {}),
+    ...(normalizedExplicit.observed_at !== undefined ? { observed_at: normalizedExplicit.observed_at } : {}),
+    ...(normalizedExplicit.is_stale !== undefined ? { is_stale: normalizedExplicit.is_stale } : {}),
+    ...(normalizedExplicit.pr_number !== undefined ? { pr_number: normalizedExplicit.pr_number } : {}),
+    ...(normalizedExplicit.issue_number !== undefined ? { issue_number: normalizedExplicit.issue_number } : {}),
+  };
+
+  return inferAnchorContextType(merged);
+}
+
+function runGitCommand(directory: string, args: string[]): string | undefined {
+  try {
+    const output = execFileSync("git", ["-C", directory, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return output || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeGitRepoIdentifier(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const withoutGitSuffix = trimmed.replace(/\.git$/i, "");
+  const sshMatch = withoutGitSuffix.match(/^git@([^:]+):(.+)$/);
+  if (sshMatch) {
+    return `${sshMatch[1]}/${sshMatch[2].replace(/^\/+/, "")}`;
+  }
+
+  if (/^https?:\/\//i.test(withoutGitSuffix) || /^ssh:\/\//i.test(withoutGitSuffix)) {
+    try {
+      const parsed = new URL(withoutGitSuffix);
+      const pathname = parsed.pathname.replace(/^\/+/, "");
+      return pathname ? `${parsed.host}/${pathname}` : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return withoutGitSuffix.replace(/^\/+/, "") || undefined;
+}
+
+function repoFromEnvironment(env: NodeJS.ProcessEnv): string | undefined {
+  const githubRepository = env.GITHUB_REPOSITORY?.trim();
+  if (githubRepository) {
+    const githubHost = normalizeGitRepoIdentifier(env.GITHUB_SERVER_URL || "https://github.com");
+    const host = githubHost?.split("/")[0] || "github.com";
+    return `${host}/${githubRepository}`;
+  }
+
+  return normalizeGitRepoIdentifier(env.CI_PROJECT_URL);
+}
+
+function refFromEnvironment(env: NodeJS.ProcessEnv): string | undefined {
+  const ref = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || env.CI_COMMIT_REF_NAME;
+  if (!ref) return undefined;
+  const trimmed = ref.trim();
+  return trimmed || undefined;
+}
+
+function inferAutomaticAnchorContext(
+  directory: string,
+  options: InferAnchorContextOptions = {}
+): Mem0AnchorContext | undefined {
+  const enabled = options.enabled ?? MEM0_AUTO_ANCHOR_CONTEXT === "safe";
+  if (!enabled) return undefined;
+
+  const env = options.env ?? process.env;
+  const runGit = options.runGit ?? runGitCommand;
+  const gitRoot = runGit(directory, ["rev-parse", "--show-toplevel"]);
+  if (!gitRoot) return undefined;
+
+  const repo = repoFromEnvironment(env) || normalizeGitRepoIdentifier(runGit(directory, ["remote", "get-url", "origin"]));
+  const commitSHA = env.GITHUB_SHA?.trim() || env.CI_COMMIT_SHA?.trim() || runGit(directory, ["rev-parse", "HEAD"]);
+  const ref = refFromEnvironment(env)
+    || (() => {
+      const branch = runGit(directory, ["rev-parse", "--abbrev-ref", "HEAD"]);
+      return branch && branch !== "HEAD" ? branch : undefined;
+    })();
+
+  if (!repo || !commitSHA) return undefined;
+
+  return {
+    type: "commit",
+    repo,
+    ref,
+    commit_sha: commitSHA,
+  };
 }
 
 function createMem0BackendClient(dependencies: Mem0BackendClientDependencies) {
@@ -474,6 +622,23 @@ function topicSignature(content: string): string {
 function shouldRefreshForTopicShift(previousSignature: string, currentSignature: string): boolean {
   if (!previousSignature || !currentSignature) return false;
   return tokenSimilarity(previousSignature, currentSignature) < 0.35;
+}
+
+function shouldRetrieveForMessage(state: Pick<SessionState, "turn" | "lastInjectionTurn" | "topicSignature">, userMessage: string) {
+  const signature = topicSignature(userMessage);
+  const recallIntent = RECALL_INTENT_PATTERN.test(removeCodeParts(userMessage));
+  const firstTurn = state.turn === 1 && MEM0_AUTO_RETRIEVE_FIRST_TURN;
+  const periodicRefresh = state.lastInjectionTurn > 0 && state.turn - state.lastInjectionTurn >= MEM0_REFRESH_EVERY_TURNS;
+  const topicShift = shouldRefreshForTopicShift(state.topicSignature, signature);
+
+  return {
+    signature,
+    recallIntent,
+    firstTurn,
+    periodicRefresh,
+    topicShift,
+    shouldRetrieve: firstTurn || recallIntent || periodicRefresh || topicShift,
+  };
 }
 
 function deriveHalfLifeDays(type: string): number {
@@ -844,6 +1009,44 @@ Use the \`mem0\` tool with \`mode: "add"\` and save only high-signal knowledge:
 - reusable procedures
 Do NOT save raw conversations or temporary reasoning.`;
 
+const COMPACTION_MEMORY_FALLBACK = "No verified Mem0 project memory was retrieved for this compaction.";
+
+function buildCompactionMemoryBlock(projectMemories: ReadonlyArray<Pick<MemoryResult, "content">>): string | undefined {
+  if (projectMemories.length === 0) return undefined;
+
+  return [
+    "## Mem0 High-Signal Project Memory",
+    ...projectMemories.map((memory) => `- ${memory.content}`),
+    "Keep these durable facts in the continuation summary.",
+  ].join("\n");
+}
+
+function buildReplaceCompactionPrompt(projectMemories: ReadonlyArray<Pick<MemoryResult, "content">>): string {
+  const memoryBlock = buildCompactionMemoryBlock(projectMemories)
+    || [
+      "## Mem0 High-Signal Project Memory",
+      `- ${COMPACTION_MEMORY_FALLBACK}`,
+      "Keep these durable facts in the continuation summary.",
+    ].join("\n");
+
+  return [
+    "You are generating a continuation summary for an OpenCode session.",
+    "Preserve only durable, actionable context.",
+    "",
+    "Return markdown with these exact section headings in this exact order:",
+    "## Final Goal",
+    "## Completed Work",
+    "## Remaining Tasks",
+    "## Critical Constraints",
+    "## Mem0 High-Signal Project Memory",
+    "",
+    "For the final section, include the Mem0 heading exactly as written and reproduce the provided bullet list verbatim.",
+    "Do not omit the Mem0 section, even when only the fallback memory is available.",
+    "",
+    memoryBlock,
+  ].join("\n");
+}
+
 export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
   const sessionState = new Map<string, SessionState>();
   const sessionDirectory = new Map<string, string>();
@@ -900,6 +1103,20 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         error instanceof Error ? error.message : String(error)
       );
     }
+  }
+
+  function shouldLogLifecycleDebug(): boolean {
+    return MEM0_LOG_INJECTION || MEM0_DEBUG_PROMPTS;
+  }
+
+  async function appendLifecycleDebugEvent(event: string, payload: JsonRecord): Promise<void> {
+    if (!shouldLogLifecycleDebug()) return;
+
+    await appendDebugEvent(event, {
+      directory: ctx.directory,
+      service: "mem0-functional-plugin",
+      ...payload,
+    });
   }
 
   async function logInjection(message: string, extra?: JsonRecord, directory = ctx.directory): Promise<void> {
@@ -1117,6 +1334,16 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
     }
   }
 
+  await appendLifecycleDebugEvent("mem0.lifecycle", {
+    stage: "plugin.init",
+    backendMode: MEM0_BACKEND_MODE,
+    serverURL: MEM0_SERVER_URL,
+    autoRetrieveFirstTurn: MEM0_AUTO_RETRIEVE_FIRST_TURN,
+    refreshEveryTurns: MEM0_REFRESH_EVERY_TURNS,
+    debugPrompts: MEM0_DEBUG_PROMPTS,
+    logInjection: MEM0_LOG_INJECTION,
+  });
+
   return {
     "chat.message": async (input, output) => {
       if (!MEM0_SERVER_URL) return;
@@ -1152,22 +1379,46 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
         }, activeDirectory);
       }
 
-      const signature = topicSignature(userMessage);
-      const recallIntent = RECALL_INTENT_PATTERN.test(removeCodeParts(userMessage));
-      const firstTurn = state.turn === 1 && MEM0_AUTO_RETRIEVE_FIRST_TURN;
-      const periodicRefresh = state.lastInjectionTurn > 0 && state.turn - state.lastInjectionTurn >= MEM0_REFRESH_EVERY_TURNS;
-      const topicShift = shouldRefreshForTopicShift(state.topicSignature, signature);
-      const shouldRetrieve = firstTurn || recallIntent || periodicRefresh || topicShift;
+      const retrievalDecision = shouldRetrieveForMessage(state, userMessage);
+      const {
+        signature,
+        recallIntent,
+        firstTurn,
+        periodicRefresh,
+        topicShift,
+        shouldRetrieve,
+      } = retrievalDecision;
 
       state.topicSignature = signature;
-      if (!shouldRetrieve) return;
+      if (!shouldRetrieve) {
+        await appendLifecycleDebugEvent("mem0.lifecycle", {
+          stage: "chat.message.skip",
+          sessionID: input.sessionID,
+          messageID: output.message.id,
+          turn: state.turn,
+          reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
+        });
+        return;
+      }
 
       try {
         const ranked = MEM0_BACKEND_MODE === "backend"
           ? await retrieveBackendCandidates(userMessage, activeDirectory, input.agent)
           : await retrieveRankedCandidates(userMessage, activeDirectory, input.agent);
         const selected = selectForInjection(ranked, state);
-        if (selected.length === 0) return;
+        if (selected.length === 0) {
+          await appendLifecycleDebugEvent("mem0.lifecycle", {
+            stage: "retrieval.empty",
+            sessionID: input.sessionID,
+            messageID: output.message.id,
+            turn: state.turn,
+            backendMode: MEM0_BACKEND_MODE,
+            rankedCount: ranked.length,
+            selectedCount: 0,
+            reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
+          });
+          return;
+        }
         const contextText = buildContextText(selected);
 
         const contextPart: Part = {
@@ -1196,6 +1447,16 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           text: MEM0_LOG_INJECTION_CONTENT ? preview(contextPart.text) : undefined,
         }, activeDirectory);
       } catch (error) {
+        await appendLifecycleDebugEvent("mem0.lifecycle", {
+          stage: "retrieval.error",
+          sessionID: input.sessionID,
+          messageID: output.message.id,
+          turn: state.turn,
+          backendMode: MEM0_BACKEND_MODE,
+          fallbackInjected: Boolean(state.lastGoodContextSnippet),
+          reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
+          error: error instanceof Error ? error.message : String(error),
+        });
         if (state.lastGoodContextSnippet) {
           const fallbackPart: Part = {
             id: createPartID("fallback-context"),
@@ -1255,16 +1516,32 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           const scope = args.scope || "project";
           const ids = scopeIdentifiers(scope, toolContext.directory, undefined);
 
-          try {
+        try {
+            await appendLifecycleDebugEvent("mem0.tool", {
+              stage: "start",
+              sessionID: toolContext.sessionID,
+              directory: toolContext.directory,
+              mode,
+              scope,
+            });
+
             if (mode === "help") {
-              return JSON.stringify({
+              const response = {
                 success: true,
                 modes: ["add", "search", "list", "forget", "help"],
                 scopes: ["user", "project", "agent", "environment"],
                 backend_mode: MEM0_BACKEND_MODE,
                 search_endpoint: mem0BackendClient.mode === "backend" ? "/retrieve" : "/search",
-                note: "Only high-signal memories should be stored. Optional add-mode anchoring can be passed via anchor or anchorContext.",
+                note: "Only high-signal memories should be stored. Optional add-mode anchoring can be passed via anchor or anchorContext; safe git context is auto-enriched when available.",
+              };
+              await appendLifecycleDebugEvent("mem0.tool", {
+                stage: "success",
+                sessionID: toolContext.sessionID,
+                directory: toolContext.directory,
+                mode,
+                scope,
               });
+              return JSON.stringify(response);
             }
 
             if (mode === "add") {
@@ -1285,7 +1562,13 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 
               const supersedes = await detectSupersedes(sanitized, quality.type, scope, toolContext.directory);
               const anchor = normalizeAnchorWriteInput(args.anchor);
-              const anchorContext = normalizeAnchorContextWriteInput(args.anchorContext);
+              const mergedAnchorContext = anchor
+                ? undefined
+                : mergeAnchorContexts(
+                    inferAutomaticAnchorContext(toolContext.directory),
+                    args.anchorContext
+                  );
+              const anchorContext = normalizeAnchorContextWriteInput(mergedAnchorContext);
               const metadata: JsonRecord = {
                 source: "opencode-plugin",
                 scope,
@@ -1319,7 +1602,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 
               const payloadData = asRecord(payload);
               const createdMemory = asRecord(payloadData?.memory);
-              return JSON.stringify({
+              const response = {
                 success: true,
                 scope,
                 type: quality.type,
@@ -1329,7 +1612,15 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                 identifiers: ids,
                 project_id: resolveProjectID(toolContext.directory),
                 supersedes,
+              };
+              await appendLifecycleDebugEvent("mem0.tool", {
+                stage: "success",
+                sessionID: toolContext.sessionID,
+                directory: toolContext.directory,
+                mode,
+                scope,
               });
+              return JSON.stringify(response);
             }
 
             if (mode === "search") {
@@ -1338,24 +1629,33 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
                 return JSON.stringify({ success: false, error: "query is required for search mode" });
               }
 
-              const response = await mem0BackendClient.search({
+              const searchResponse = await mem0BackendClient.search({
                 query: args.query,
                 identifiers: ids,
                 limit: args.limit,
                 scope,
               });
-              return JSON.stringify({
+              const toolResponse = {
                 success: true,
                 scope,
-                mode: response.mode,
-                endpoint: response.endpoint,
-                backend_capabilities: response.backendCapabilities,
-                degraded: response.degraded,
-                degradation_reasons: response.degradationReasons,
-                request_id: response.requestId,
-                count: response.results.length,
-                results: response.results,
+                mode: searchResponse.mode,
+                endpoint: searchResponse.endpoint,
+                backend_capabilities: searchResponse.backendCapabilities,
+                degraded: searchResponse.degraded,
+                degradation_reasons: searchResponse.degradationReasons,
+                request_id: searchResponse.requestId,
+                count: searchResponse.results.length,
+                results: searchResponse.results,
+              };
+              await appendLifecycleDebugEvent("mem0.tool", {
+                stage: "success",
+                sessionID: toolContext.sessionID,
+                directory: toolContext.directory,
+                mode,
+                scope,
+                resultCount: toolResponse.count,
               });
+              return JSON.stringify(toolResponse);
             }
 
             if (mode === "list") {
@@ -1366,6 +1666,14 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
               const payload = await mem0Request(`/memories?${query.toString()}`, { method: "GET" });
 
               const results = normalizeResults(payload).slice(0, args.limit || 20);
+              await appendLifecycleDebugEvent("mem0.tool", {
+                stage: "success",
+                sessionID: toolContext.sessionID,
+                directory: toolContext.directory,
+                mode,
+                scope,
+                resultCount: results.length,
+              });
               return JSON.stringify({ success: true, scope, count: results.length, results });
             }
 
@@ -1376,11 +1684,26 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
               }
 
               await mem0Request(`/memories/${encodeURIComponent(args.memoryId)}`, { method: "DELETE" });
+              await appendLifecycleDebugEvent("mem0.tool", {
+                stage: "success",
+                sessionID: toolContext.sessionID,
+                directory: toolContext.directory,
+                mode,
+                scope,
+              });
               return JSON.stringify({ success: true, deleted: args.memoryId });
             }
 
             return JSON.stringify({ success: false, error: `Unknown mode: ${mode}` });
           } catch (error) {
+            await appendLifecycleDebugEvent("mem0.tool", {
+              stage: "error",
+              sessionID: toolContext.sessionID,
+              directory: toolContext.directory,
+              mode,
+              scope,
+              error: error instanceof Error ? error.message : String(error),
+            });
             return JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),
@@ -1460,38 +1783,68 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
           8
         );
 
-        if (projectMemories.length === 0) return;
-
-        // WHY: Compaction is where context is compressed; injecting only high-signal
-        // project memory avoids losing durable decisions across long sessions.
-        const memoryBlock = [
-          "## Mem0 High-Signal Project Memory",
-          ...projectMemories.map((m) => `- ${m.content}`),
-          "Keep these durable facts in the continuation summary.",
-        ].join("\n");
-
         if (MEM0_COMPACTION_MODE === "replace") {
           // WHY: Some teams want deterministic compaction output and prefer
           // owning the entire summary template. This mode is opt-in because
           // replacing defaults can remove useful built-in continuity guidance.
-          output.prompt = [
-            "You are generating a continuation summary for an OpenCode session.",
-            "Preserve only durable, actionable context.",
-            "",
-            "Required sections:",
-            "1) Final Goal",
-            "2) Completed Work",
-            "3) Remaining Tasks",
-            "4) Critical Constraints",
-            "5) High-Signal Memory to Carry Forward",
-            "",
-            memoryBlock,
-          ].join("\n");
+          output.prompt = buildReplaceCompactionPrompt(projectMemories);
+          await appendDebugEvent("mem0.compaction", {
+            sessionID: _input.sessionID,
+            directory: activeDirectory,
+            mode: MEM0_COMPACTION_MODE,
+            branch: "replace",
+            memoryCount: projectMemories.length,
+            prompt: MEM0_DEBUG_PROMPT_CONTENT ? sanitizeDebugText(output.prompt) : undefined,
+          });
+          return;
+        }
+
+        const memoryBlock = buildCompactionMemoryBlock(projectMemories);
+        if (!memoryBlock) {
+          await appendDebugEvent("mem0.compaction", {
+            sessionID: _input.sessionID,
+            directory: activeDirectory,
+            mode: MEM0_COMPACTION_MODE,
+            branch: "append",
+            memoryCount: projectMemories.length,
+            memoryBlockIncluded: false,
+          });
           return;
         }
 
         output.context.push(memoryBlock);
+        await appendDebugEvent("mem0.compaction", {
+          sessionID: _input.sessionID,
+          directory: activeDirectory,
+          mode: MEM0_COMPACTION_MODE,
+          branch: "append",
+          memoryCount: projectMemories.length,
+          memoryBlockIncluded: true,
+          memoryBlock: MEM0_DEBUG_PROMPT_CONTENT ? sanitizeDebugText(memoryBlock) : undefined,
+        });
       } catch {
+        if (MEM0_COMPACTION_MODE === "replace") {
+          output.prompt = buildReplaceCompactionPrompt([]);
+          await appendDebugEvent("mem0.compaction", {
+            sessionID: _input.sessionID,
+            directory: activeDirectory,
+            mode: MEM0_COMPACTION_MODE,
+            branch: "replace",
+            memoryCount: 0,
+            fallbackUsed: true,
+            prompt: MEM0_DEBUG_PROMPT_CONTENT ? sanitizeDebugText(output.prompt) : undefined,
+          });
+          return;
+        }
+
+        await appendDebugEvent("mem0.compaction", {
+          sessionID: _input.sessionID,
+          directory: activeDirectory,
+          mode: MEM0_COMPACTION_MODE,
+          branch: "append",
+          memoryCount: 0,
+          fallbackUsed: true,
+        });
         return;
       }
     },
@@ -1546,3 +1899,15 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
     },
   };
 };
+
+export const __test__ = Object.assign(Mem0FunctionalPlugin, {
+  inferAnchorContextType,
+  mergeAnchorContexts,
+  inferAutomaticAnchorContext,
+  normalizeGitRepoIdentifier,
+  buildCompactionMemoryBlock,
+  buildReplaceCompactionPrompt,
+  shouldRetrieveForMessage,
+});
+
+export default Mem0FunctionalPlugin;
